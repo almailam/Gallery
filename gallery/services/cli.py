@@ -6,10 +6,45 @@ import asyncio
 import logging
 from pathlib import Path
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion, PathCompleter
+from prompt_toolkit.document import Document
+from prompt_toolkit.patch_stdout import patch_stdout
+
 from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.messages import ImageUploadRequested, SearchRequested
 
 log = logging.getLogger(__name__)
+
+
+class _CLICompleter(Completer):
+    """Tab completion for top-level commands and upload paths."""
+
+    _commands = ("upload", "search", "quit", "exit", "q")
+
+    def __init__(self) -> None:
+        self._path_completer = PathCompleter(expanduser=True)
+
+    def get_completions(self, document: Document, complete_event):
+        text = document.text_before_cursor
+        parts = text.split(maxsplit=1)
+
+        # Complete command name when still typing first token.
+        if len(parts) <= 1 and not text.endswith(" "):
+            prefix = parts[0] if parts else ""
+            for cmd in self._commands:
+                if cmd.startswith(prefix):
+                    yield Completion(cmd, start_position=-len(prefix))
+            return
+
+        cmd = parts[0].lower() if parts else ""
+        if cmd != "upload":
+            return
+
+        # For upload <path>, complete filesystem paths.
+        path_text = parts[1] if len(parts) > 1 else ""
+        path_doc = Document(path_text, cursor_position=len(path_text))
+        yield from self._path_completer.get_completions(path_doc, complete_event)
 
 
 class CLIService:
@@ -78,11 +113,16 @@ class CLIService:
         log.info("Requested search for %r", query)
 
     async def run_interactive(self) -> None:
-        loop = asyncio.get_event_loop()
+        session = PromptSession(
+            completer=_CLICompleter(),
+            complete_while_typing=False,
+        )
         print("\nCommands:  upload <path>  |  search <query>  |  quit")
 
         while True:
-            line: str = await loop.run_in_executor(None, input, "> ")
+            # Keep prompt responsive even while background event handlers print logs.
+            with patch_stdout():
+                line: str = await session.prompt_async("> ")
             line = line.strip()
             if not line:
                 continue
