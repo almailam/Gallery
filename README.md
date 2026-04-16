@@ -14,7 +14,7 @@
 
 1. Install: `pip install -r requirements.txt`  
 2. Run: `python main.py`  
-3. In the CLI: `upload <path>` or `search <query>`, then `quit`.
+3. In the CLI: `upload samples/bananas.jpg`, `search stub-tag`, or `quit`.
 
 Notes:
 - If Redis is not already running, the program will try to start `redis-server` automatically (if it’s installed).
