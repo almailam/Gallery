@@ -18,17 +18,32 @@ class CLIService:
         self._register_handlers()
 
     def _register_handlers(self) -> None:
-        @self.broker.on(Channels.SEARCH_RESULTS_READY)
-        async def on_results(msg: dict) -> None:
-            print(f"[CLI] Search results:")
-            for r in msg.get("results", []):
-                print(f"       {r}")
+        @self.broker.on(Channels.IMAGE_ACCEPTED)
+        async def on_accepted(msg: dict) -> None:
+            print(
+                f"[CLI] image.accepted   image_id={msg.get('image_id')} path={msg.get('path')}"
+            )
+
+        @self.broker.on(Channels.IMAGE_STORED)
+        async def on_stored(msg: dict) -> None:
+            print(
+                f"[CLI] image.stored     image_id={msg.get('image_id')} path={msg.get('path')}"
+            )
 
         @self.broker.on(Channels.IMAGE_PIPELINE_COMPLETE)
         async def on_upload_done(msg: dict) -> None:
             print(
-                f"[CLI] Upload finished: image_id={msg.get('image_id')} path={msg.get('path')}"
+                f"[CLI] image.pipeline_complete image_id={msg.get('image_id')} path={msg.get('path')}"
             )
+
+        @self.broker.on(Channels.SEARCH_RESULTS_READY)
+        async def on_search_results(msg: dict) -> None:
+            print(
+                f"[CLI] search.results_ready request_id={msg.get('request_id')} "
+                f"count={len(msg.get('results', []))}"
+            )
+            if msg.get("note"):
+                print(f"[CLI] {msg.get('note')}")
 
     async def upload_image(self, path: str) -> None:
         try:
@@ -54,8 +69,13 @@ class CLIService:
 
     async def search(self, query: str) -> None:
         msg = SearchRequested(query=query)
-        await self.broker.publish(Channels.SEARCH_REQUESTED, msg)
-        log.info("Search requested: %r", query)
+        try:
+            await self.broker.publish(Channels.SEARCH_REQUESTED, msg)
+        except Exception as e:
+            print(f"[CLI] Error: could not send search to Redis: {e}")
+            log.exception("Search publish failed")
+            return
+        log.info("Requested search for %r", query)
 
     async def run_interactive(self) -> None:
         loop = asyncio.get_event_loop()
@@ -76,4 +96,4 @@ class CLIService:
             elif cmd == "search" and arg:
                 await self.search(arg)
             else:
-                print(f"Usage:  upload <path>  |  search <query>")
+                print("Usage:  upload <path>  |  search <query>")

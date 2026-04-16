@@ -1,4 +1,4 @@
-"""Pub/sub message types."""
+"""Pub/sub message types for the messaging-only architecture."""
 
 from __future__ import annotations
 
@@ -7,20 +7,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-
-# ---------------------------------------------------------------------------
-# Shared metadata helpers
-# ---------------------------------------------------------------------------
-
-@dataclass
-class VectorMeta:
-    model: str = ""
-    dimensions: int = 0
-
-
-# ---------------------------------------------------------------------------
-# Base
-# ---------------------------------------------------------------------------
 
 @dataclass
 class Message:
@@ -32,32 +18,39 @@ class Message:
         return json.dumps(asdict(self))
 
 
-# ---------------------------------------------------------------------------
-# Image pipeline
-# ---------------------------------------------------------------------------
-
 @dataclass
 class ImageUploadRequested(Message):
     type: str = "image.upload_requested"
     path: str = ""
-    vector_meta: VectorMeta = field(default_factory=VectorMeta)
 
 
 @dataclass
-class ImageAnnotated(Message):
-    type: str = "image.annotated"
+class ImageAccepted(Message):
+    type: str = "image.accepted"
     image_id: str = ""
     path: str = ""
-    tags: list[str] = field(default_factory=list)
-    caption: str = ""
 
 
 @dataclass
-class ImageEmbedded(Message):
-    type: str = "image.embedded"
+class ImageAnnotationRequested(Message):
+    type: str = "image.annotation_requested"
     image_id: str = ""
-    embedding: list[float] = field(default_factory=list)
-    vector_meta: VectorMeta = field(default_factory=VectorMeta)
+    path: str = ""
+
+
+@dataclass
+class ImageEmbeddingRequested(Message):
+    type: str = "image.embedding_requested"
+    image_id: str = ""
+    path: str = ""
+
+
+@dataclass
+class ImageStored(Message):
+    type: str = "image.stored"
+    image_id: str = ""
+    path: str = ""
+    status: str = "stored"
 
 
 @dataclass
@@ -67,14 +60,11 @@ class ImagePipelineComplete(Message):
     path: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Search pipeline
-# ---------------------------------------------------------------------------
-
 @dataclass
 class SearchRequested(Message):
     type: str = "search.requested"
     query: str = ""
+    top_k: int = 5
 
 
 @dataclass
@@ -82,3 +72,4 @@ class SearchResultsReady(Message):
     type: str = "search.results_ready"
     request_id: str = ""
     results: list[dict] = field(default_factory=list)
+    note: str = "Search is not implemented yet."

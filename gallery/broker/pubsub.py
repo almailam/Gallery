@@ -25,8 +25,10 @@ def _as_str(value: object) -> str:
 
 class Channels:
     IMAGE_UPLOAD_REQUESTED = "gallery:image:upload_requested"
-    IMAGE_ANNOTATED = "gallery:image:annotated"
-    IMAGE_EMBEDDED = "gallery:image:embedded"
+    IMAGE_ACCEPTED = "gallery:image:accepted"
+    IMAGE_ANNOTATION_REQUESTED = "gallery:image:annotation_requested"
+    IMAGE_EMBEDDING_REQUESTED = "gallery:image:embedding_requested"
+    IMAGE_STORED = "gallery:image:stored"
     IMAGE_PIPELINE_COMPLETE = "gallery:image:pipeline_complete"
     SEARCH_REQUESTED = "gallery:search:requested"
     SEARCH_RESULTS_READY = "gallery:search:results_ready"

@@ -1,4 +1,4 @@
-"""Image service - stubs for annotation and embedding."""
+"""Image service - accepts uploads and emits lifecycle events."""
 
 from __future__ import annotations
 
@@ -7,10 +7,9 @@ import uuid
 
 from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.messages import (
-    ImageAnnotated,
-    ImageEmbedded,
-    ImagePipelineComplete,
-    VectorMeta,
+    ImageAccepted,
+    ImageAnnotationRequested,
+    ImageEmbeddingRequested,
 )
 
 log = logging.getLogger(__name__)
@@ -29,29 +28,27 @@ class ImageService:
     async def _process(self, msg: dict) -> None:
         image_id = str(uuid.uuid4())
         path = msg.get("path", "")
-        vector_meta = VectorMeta(model="clip-vit-base", dimensions=512)
-        log.info("[ImageService] Processing %s -> %s", path, image_id)
+        log.info("[ImageService] Accepted upload %s -> %s", path, image_id)
 
         await self.broker.publish(
-            Channels.IMAGE_ANNOTATED,
-            ImageAnnotated(
+            Channels.IMAGE_ACCEPTED,
+            ImageAccepted(
                 image_id=image_id,
                 path=path,
-                tags=["stub-tag"],       # TODO: vision model
-                caption="stub caption",  # TODO: captioning model
             ),
         )
-
         await self.broker.publish(
-            Channels.IMAGE_EMBEDDED,
-            ImageEmbedded(
+            Channels.IMAGE_ANNOTATION_REQUESTED,
+            ImageAnnotationRequested(
                 image_id=image_id,
-                embedding=[0.0] * vector_meta.dimensions,  # TODO: CLIP encoder
-                vector_meta=vector_meta,
+                path=path,
+            ),
+        )
+        await self.broker.publish(
+            Channels.IMAGE_EMBEDDING_REQUESTED,
+            ImageEmbeddingRequested(
+                image_id=image_id,
+                path=path,
             ),
         )
 
-        await self.broker.publish(
-            Channels.IMAGE_PIPELINE_COMPLETE,
-            ImagePipelineComplete(image_id=image_id, path=path),
-        )

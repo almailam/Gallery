@@ -1,14 +1,15 @@
 import json
 
 from gallery.messages import (
-    ImageAnnotated,
-    ImageEmbedded,
+    ImageAccepted,
+    ImageAnnotationRequested,
+    ImageEmbeddingRequested,
     ImagePipelineComplete,
+    ImageStored,
     ImageUploadRequested,
     Message,
     SearchRequested,
     SearchResultsReady,
-    VectorMeta,
 )
 
 
@@ -37,32 +38,19 @@ def test_image_upload_requested_type():
     assert m.path == "/photos/dog.jpg"
 
 
-def test_image_upload_requested_vector_meta_default():
-    m = ImageUploadRequested()
-    assert isinstance(m.vector_meta, VectorMeta)
-    assert m.vector_meta.model == ""
-    assert m.vector_meta.dimensions == 0
-
-
-def test_image_upload_requested_vector_meta_custom():
-    meta = VectorMeta(model="clip", dimensions=512)
-    m = ImageUploadRequested(path="/img.jpg", vector_meta=meta)
+def test_image_accepted_fields():
+    m = ImageAccepted(image_id="abc", path="/img.jpg")
+    assert m.type == "image.accepted"
     data = json.loads(m.to_json())
-    assert data["vector_meta"] == {"model": "clip", "dimensions": 512}
+    assert data["image_id"] == "abc"
+    assert data["path"] == "/img.jpg"
 
 
-def test_image_annotated_fields():
-    m = ImageAnnotated(image_id="abc", path="/img.jpg", tags=["dog"], caption="a dog")
-    assert m.type == "image.annotated"
+def test_image_stored_fields():
+    m = ImageStored(image_id="abc", path="/img.jpg")
+    assert m.type == "image.stored"
     data = json.loads(m.to_json())
-    assert data["tags"] == ["dog"]
-    assert data["caption"] == "a dog"
-
-
-def test_image_embedded_fields():
-    m = ImageEmbedded(image_id="abc", embedding=[0.1, 0.2])
-    assert m.type == "image.embedded"
-    assert m.embedding == [0.1, 0.2]
+    assert data["status"] == "stored"
 
 
 def test_image_pipeline_complete_fields():
@@ -73,15 +61,31 @@ def test_image_pipeline_complete_fields():
     assert data["path"] == "/tmp/x.jpg"
 
 
+def test_image_annotation_requested_fields():
+    m = ImageAnnotationRequested(image_id="abc", path="/img.jpg")
+    assert m.type == "image.annotation_requested"
+    data = json.loads(m.to_json())
+    assert data["image_id"] == "abc"
+
+
+def test_image_embedding_requested_fields():
+    m = ImageEmbeddingRequested(image_id="abc", path="/img.jpg")
+    assert m.type == "image.embedding_requested"
+    data = json.loads(m.to_json())
+    assert data["path"] == "/img.jpg"
+
+
 def test_search_requested_fields():
-    m = SearchRequested(query="dogs playing outside")
+    m = SearchRequested(query="cats", top_k=3)
     assert m.type == "search.requested"
-    assert m.query == "dogs playing outside"
+    data = json.loads(m.to_json())
+    assert data["query"] == "cats"
+    assert data["top_k"] == 3
 
 
 def test_search_results_ready_fields():
-    results = [{"image_id": "abc", "path": "/img.jpg"}]
-    m = SearchResultsReady(request_id="req-1", results=results)
+    m = SearchResultsReady(request_id="r1", results=[])
     assert m.type == "search.results_ready"
     data = json.loads(m.to_json())
-    assert data["results"] == results
+    assert data["request_id"] == "r1"
+    assert "note" in data
