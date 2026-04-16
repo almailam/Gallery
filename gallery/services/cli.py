@@ -90,7 +90,7 @@ class CLIService:
             print(f"[CLI] Error: file not found: {path}")
             print(
                 "[CLI] Hint: use an absolute path, or run the app from the project "
-                "folder and try e.g. image_samples/apple.jpeg"
+                "folder and try e.g. samples/apple.jpeg"
             )
             return
         msg = ImageUploadRequested(path=str(resolved))

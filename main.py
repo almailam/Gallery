@@ -65,9 +65,9 @@ async def main() -> None:
         raise SystemExit(1)
 
     # Instantiate services - each one registers its own handlers on the broker.
-    image_svc = ImageService(broker)          # noqa: F841
-    doc_db = DocumentDBService(broker)        # noqa: F841
-    vec_db = VectorDBService(broker)          # noqa: F841
+    ImageService(broker)
+    DocumentDBService(broker)
+    VectorDBService(broker)
     cli = CLIService(broker)
 
     # Run the broker listener and the interactive CLI concurrently.

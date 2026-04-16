@@ -1,2 +1,2 @@
-redis[asyncio]>=5.0
+redis>=5.0
 prompt_toolkit>=3.0
