@@ -7,7 +7,9 @@ from gallery.broker.pubsub import (
     RedisBroker,
     _ansi_for_message_type,
     _as_str,
+    _format_connected_line,
     _format_incoming_redis_log_line,
+    _format_listening_line,
 )
 from gallery.messages import ImageUploadRequested
 
@@ -17,6 +19,28 @@ def broker():
     b = RedisBroker()
     b._client = AsyncMock()
     return b
+
+
+def test_format_connected_and_listening_plain():
+    c = _format_connected_line("redis://localhost:6379", use_color=False)
+    assert "Connected to Redis" in c
+    assert "redis://localhost:6379" in c
+    assert "\033[" not in c
+
+    lst = _format_listening_line(["gallery:a", "gallery:b"], use_color=False)
+    assert "Listening on channels" in lst
+    assert "gallery:a" in lst
+    assert "\033[" not in lst
+
+
+def test_format_connected_and_listening_colored():
+    c = _format_connected_line("redis://localhost:6379", use_color=True)
+    assert "\033[" in c
+    assert "[REDIS]" in c
+
+    lst = _format_listening_line(["gallery:image:x"], use_color=True)
+    assert "\033[" in lst
+    assert "gallery:image:x" in lst
 
 
 def test_format_incoming_redis_plain_no_escapes():

@@ -51,6 +51,27 @@ def _ansi_for_message_type(mtype: str) -> str:
     return _TYPE_COLOR.get(mtype, _DEFAULT_TYPE_COLOR)
 
 
+def _redis_tag(*, use_color: bool) -> str:
+    if not use_color:
+        return "[REDIS]"
+    return f"{_BOLD}\033[95m[REDIS]{_RESET}"
+
+
+def _format_connected_line(url: str, *, use_color: bool) -> str:
+    if not use_color:
+        return f"Connected to Redis at {url}"
+    tag = _redis_tag(use_color=use_color)
+    return f"{tag} {_BOLD}Connected{_RESET} to Redis at {_DIM}{url}{_RESET}"
+
+
+def _format_listening_line(channels: list[str], *, use_color: bool) -> str:
+    if not use_color:
+        return f"Listening on channels: {channels}"
+    tag = _redis_tag(use_color=use_color)
+    listed = ", ".join(f"{_DIM}{c}{_RESET}" for c in channels)
+    return f"{tag} {_BOLD}Listening{_RESET} on channels: {listed}"
+
+
 def _format_incoming_redis_log_line(channel: str, data: dict, *, use_color: bool) -> str:
     """One log line per incoming Redis message: label, channel, colored type, full JSON body."""
     mtype = str(data.get("type", "") or "?")
@@ -59,7 +80,7 @@ def _format_incoming_redis_log_line(channel: str, data: dict, *, use_color: bool
     if not use_color:
         return f"[REDIS] channel={channel} type={mtype} raw={payload}"
 
-    tag = f"{_BOLD}\033[95m[REDIS]{_RESET}"
+    tag = _redis_tag(use_color=use_color)
     ch = f"{_DIM}{channel}{_RESET}"
     tc = _ansi_for_message_type(mtype)
     type_seg = f"type={tc}{mtype}{_RESET}"
@@ -111,7 +132,7 @@ class RedisBroker:
         # Force a real connection now (redis-py otherwise connects lazily).
         await self._client.ping()
         await self._listener.ping()
-        log.info("Connected to Redis at %s", self._url)
+        log.info("%s", _format_connected_line(self._url, use_color=_use_ansi_color()))
 
     async def disconnect(self) -> None:
         if self._client:
@@ -145,7 +166,7 @@ class RedisBroker:
 
         pubsub = self._listener.pubsub()
         await pubsub.subscribe(*channels)
-        log.info("Listening on channels: %s", channels)
+        log.info("%s", _format_listening_line(channels, use_color=_use_ansi_color()))
 
         async for raw in pubsub.listen():
             if raw["type"] != "message":
