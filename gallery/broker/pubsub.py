@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import sys
 from typing import Awaitable, Callable
 
 import redis.asyncio as aioredis
@@ -21,6 +23,48 @@ def _as_str(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value)
+
+
+def _use_ansi_color() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
+
+
+_RESET = "\033[0m"
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+
+# Distinct hues per application message.type (payload JSON), not Redis pub/sub "type".
+_TYPE_COLOR: dict[str, str] = {
+    "image.upload_requested": "\033[38;5;214m",  # orange
+    "image.accepted": "\033[32m",  # green
+    "image.annotation_requested": "\033[38;5;39m",  # teal
+    "image.embedding_requested": "\033[38;5;99m",  # purple
+    "image.stored": "\033[38;5;118m",  # yellow-green
+    "image.pipeline_complete": "\033[38;5;51m",  # cyan
+    "search.requested": "\033[38;5;208m",  # dark orange
+    "search.results_ready": "\033[35m",  # magenta
+}
+_DEFAULT_TYPE_COLOR = "\033[36m"
+
+
+def _ansi_for_message_type(mtype: str) -> str:
+    return _TYPE_COLOR.get(mtype, _DEFAULT_TYPE_COLOR)
+
+
+def _format_incoming_redis_log_line(channel: str, data: dict, *, use_color: bool) -> str:
+    """One log line per incoming Redis message: label, channel, colored type, full JSON body."""
+    mtype = str(data.get("type", "") or "?")
+    payload = json.dumps(data, ensure_ascii=False)
+
+    if not use_color:
+        return f"[REDIS] channel={channel} type={mtype} raw={payload}"
+
+    tag = f"{_BOLD}\033[95m[REDIS]{_RESET}"
+    ch = f"{_DIM}{channel}{_RESET}"
+    tc = _ansi_for_message_type(mtype)
+    type_seg = f"type={tc}{mtype}{_RESET}"
+    body = f"raw={_DIM}{payload}{_RESET}"
+    return f"{tag} {ch}  {type_seg}  {body}"
 
 
 class Channels:
@@ -116,6 +160,8 @@ class RedisBroker:
             except json.JSONDecodeError:
                 log.warning("Malformed message on %s", channel)
                 continue
+
+            log.info("%s", _format_incoming_redis_log_line(channel, data, use_color=_use_ansi_color()))
 
             for handler in self._handlers.get(channel, []):
 

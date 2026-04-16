@@ -2,7 +2,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from gallery.broker.pubsub import Channels, RedisBroker, _as_str
+from gallery.broker.pubsub import (
+    Channels,
+    RedisBroker,
+    _ansi_for_message_type,
+    _as_str,
+    _format_incoming_redis_log_line,
+)
 from gallery.messages import ImageUploadRequested
 
 
@@ -11,6 +17,43 @@ def broker():
     b = RedisBroker()
     b._client = AsyncMock()
     return b
+
+
+def test_format_incoming_redis_plain_no_escapes():
+    line = _format_incoming_redis_log_line(
+        "gallery:image:accepted",
+        {"type": "image.accepted", "id": "x"},
+        use_color=False,
+    )
+    assert "[REDIS]" in line
+    assert "gallery:image:accepted" in line
+    assert "image.accepted" in line
+    assert "\033[" not in line
+
+
+def test_format_incoming_redis_colored_has_escapes():
+    line = _format_incoming_redis_log_line(
+        "gallery:image:accepted",
+        {"type": "image.accepted"},
+        use_color=True,
+    )
+    assert "\033[" in line
+    assert "[REDIS]" in line
+
+
+def test_ansi_for_message_type_known_types_distinct():
+    types = (
+        "image.upload_requested",
+        "image.accepted",
+        "image.annotation_requested",
+        "image.embedding_requested",
+        "image.stored",
+        "image.pipeline_complete",
+        "search.requested",
+        "search.results_ready",
+    )
+    codes = {_ansi_for_message_type(t) for t in types}
+    assert len(codes) == len(types)
 
 
 def test_as_str_normalizes_redis_channel_keys():
