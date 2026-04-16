@@ -1,0 +1,63 @@
+name: Copilot Auto Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  request-copilot-review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Request Copilot review
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            const copilotLogins = [
+              "copilot-pull-request-reviewer[bot]",
+              "github-copilot[bot]",
+              "github-copilot-for-pull-requests[bot]",
+            ];
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number });
+            const requested = (pr.data.requested_reviewers || [])
+              .map((reviewer) => reviewer.login);
+
+            if (requested.some((login) => copilotLogins.includes(login))) {
+              core.info("Copilot is already requested as a reviewer.");
+              return;
+            }
+
+            for (const reviewer of copilotLogins) {
+              try {
+                await github.rest.pulls.requestReviewers({
+                  owner,
+                  repo,
+                  pull_number,
+                  reviewers: [reviewer],
+                });
+                core.info(`Requested Copilot review using reviewer '${reviewer}'.`);
+                return;
+              } catch (error) {
+                core.info(
+                  `Could not request reviewer '${reviewer}': ${error.status || "unknown"} ${error.message}`,
+                );
+              }
+            }
+
+            core.warning(
+              'Unable to request Copilot automatically. Enable the repository ruleset option "Automatically request Copilot code review" with "Review new pushes".',
+            );
