@@ -6,7 +6,12 @@ import logging
 import uuid
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import ImageAnnotated, ImageEmbedded, VectorMeta
+from gallery.messages import (
+    ImageAnnotated,
+    ImageEmbedded,
+    ImagePipelineComplete,
+    VectorMeta,
+)
 
 log = logging.getLogger(__name__)
 
@@ -44,4 +49,9 @@ class ImageService:
                 embedding=[0.0] * vector_meta.dimensions,  # TODO: CLIP encoder
                 vector_meta=vector_meta,
             ),
+        )
+
+        await self.broker.publish(
+            Channels.IMAGE_PIPELINE_COMPLETE,
+            ImagePipelineComplete(image_id=image_id, path=path),
         )

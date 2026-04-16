@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gallery.broker.pubsub import Channels, RedisBroker
+from gallery.broker.pubsub import Channels, RedisBroker, _as_str
 from gallery.messages import ImageUploadRequested, SearchRequested
 
 
@@ -13,8 +13,14 @@ def broker():
     return b
 
 
+def test_as_str_normalizes_redis_channel_keys():
+    assert _as_str("gallery:image:upload_requested") == "gallery:image:upload_requested"
+    assert _as_str(b"gallery:image:upload_requested") == "gallery:image:upload_requested"
+
+
 def test_channels_constants():
     assert Channels.IMAGE_UPLOAD_REQUESTED == "gallery:image:upload_requested"
+    assert Channels.IMAGE_PIPELINE_COMPLETE == "gallery:image:pipeline_complete"
     assert Channels.SEARCH_REQUESTED == "gallery:search:requested"
     assert Channels.SEARCH_RESULTS_READY == "gallery:search:results_ready"
 

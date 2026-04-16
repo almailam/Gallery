@@ -3,6 +3,7 @@ import json
 from gallery.messages import (
     ImageAnnotated,
     ImageEmbedded,
+    ImagePipelineComplete,
     ImageUploadRequested,
     Message,
     SearchRequested,
@@ -62,6 +63,14 @@ def test_image_embedded_fields():
     m = ImageEmbedded(image_id="abc", embedding=[0.1, 0.2])
     assert m.type == "image.embedded"
     assert m.embedding == [0.1, 0.2]
+
+
+def test_image_pipeline_complete_fields():
+    m = ImagePipelineComplete(image_id="abc", path="/tmp/x.jpg")
+    assert m.type == "image.pipeline_complete"
+    data = json.loads(m.to_json())
+    assert data["image_id"] == "abc"
+    assert data["path"] == "/tmp/x.jpg"
 
 
 def test_search_requested_fields():

@@ -60,6 +60,13 @@ class ImageEmbedded(Message):
     vector_meta: VectorMeta = field(default_factory=VectorMeta)
 
 
+@dataclass
+class ImagePipelineComplete(Message):
+    type: str = "image.pipeline_complete"
+    image_id: str = ""
+    path: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Search pipeline
 # ---------------------------------------------------------------------------

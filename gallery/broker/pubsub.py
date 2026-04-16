@@ -16,10 +16,18 @@ log = logging.getLogger(__name__)
 Handler = Callable[[dict], Awaitable[None]]
 
 
+def _as_str(value: object) -> str:
+    """Redis pub/sub may return channel names as bytes even with decode_responses."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 class Channels:
     IMAGE_UPLOAD_REQUESTED = "gallery:image:upload_requested"
     IMAGE_ANNOTATED = "gallery:image:annotated"
     IMAGE_EMBEDDED = "gallery:image:embedded"
+    IMAGE_PIPELINE_COMPLETE = "gallery:image:pipeline_complete"
     SEARCH_REQUESTED = "gallery:search:requested"
     SEARCH_RESULTS_READY = "gallery:search:results_ready"
 
@@ -46,16 +54,26 @@ class RedisBroker:
 
     def __init__(self, url: str = "redis://localhost:6379") -> None:
         self._url = url
+        # Separate clients so the subscriber connection is not shared with PUBLISH.
         self._client: aioredis.Redis | None = None
+        self._listener: aioredis.Redis | None = None
         self._handlers: dict[str, list[Handler]] = {}
 
     async def connect(self) -> None:
         self._client = aioredis.from_url(self._url, decode_responses=True)
+        self._listener = aioredis.from_url(self._url, decode_responses=True)
+        # Force a real connection now (redis-py otherwise connects lazily).
+        await self._client.ping()
+        await self._listener.ping()
         log.info("Connected to Redis at %s", self._url)
 
     async def disconnect(self) -> None:
         if self._client:
             await self._client.aclose()
+            self._client = None
+        if self._listener:
+            await self._listener.aclose()
+            self._listener = None
 
     def on(self, channel: str) -> Callable[[Handler], Handler]:
         """Decorator that registers a handler for a channel."""
@@ -73,13 +91,13 @@ class RedisBroker:
 
     async def listen(self) -> None:
         """Subscribe to all registered channels and dispatch incoming messages."""
-        assert self._client, "Call connect() first"
-
         channels = list(self._handlers)
         if not channels:
             return
 
-        pubsub = self._client.pubsub()
+        assert self._listener, "Call connect() first"
+
+        pubsub = self._listener.pubsub()
         await pubsub.subscribe(*channels)
         log.info("Listening on channels: %s", channels)
 
@@ -87,12 +105,26 @@ class RedisBroker:
             if raw["type"] != "message":
                 continue
 
-            channel: str = raw["channel"]
+            channel = _as_str(raw["channel"])
+            payload = raw["data"]
+            if isinstance(payload, bytes):
+                payload = payload.decode("utf-8", errors="replace")
             try:
-                data: dict = json.loads(raw["data"])
+                data: dict = json.loads(payload)
             except json.JSONDecodeError:
                 log.warning("Malformed message on %s", channel)
                 continue
 
             for handler in self._handlers.get(channel, []):
-                asyncio.create_task(handler(data))
+
+                async def _run(
+                    h: Handler = handler,
+                    ch: str = channel,
+                    msg: dict = data,
+                ) -> None:
+                    try:
+                        await h(msg)
+                    except Exception:
+                        log.exception("Handler failed on %s", ch)
+
+                asyncio.create_task(_run())

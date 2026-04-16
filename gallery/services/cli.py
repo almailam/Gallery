@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.messages import ImageUploadRequested, SearchRequested
@@ -23,10 +24,33 @@ class CLIService:
             for r in msg.get("results", []):
                 print(f"       {r}")
 
+        @self.broker.on(Channels.IMAGE_PIPELINE_COMPLETE)
+        async def on_upload_done(msg: dict) -> None:
+            print(
+                f"[CLI] Upload finished: image_id={msg.get('image_id')} path={msg.get('path')}"
+            )
+
     async def upload_image(self, path: str) -> None:
-        msg = ImageUploadRequested(path=path)
-        await self.broker.publish(Channels.IMAGE_UPLOAD_REQUESTED, msg)
-        log.info("Requested upload for %s", path)
+        try:
+            resolved = Path(path).expanduser().resolve()
+        except (OSError, RuntimeError) as e:
+            print(f"[CLI] Error: invalid path {path!r}: {e}")
+            return
+        if not resolved.is_file():
+            print(f"[CLI] Error: file not found: {path}")
+            print(
+                "[CLI] Hint: use an absolute path, or run the app from the project "
+                "folder and try e.g. image_samples/apple.jpeg"
+            )
+            return
+        msg = ImageUploadRequested(path=str(resolved))
+        try:
+            await self.broker.publish(Channels.IMAGE_UPLOAD_REQUESTED, msg)
+        except Exception as e:
+            print(f"[CLI] Error: could not send upload to Redis: {e}")
+            log.exception("Upload publish failed")
+            return
+        log.info("Requested upload for %s", resolved)
 
     async def search(self, query: str) -> None:
         msg = SearchRequested(query=query)
