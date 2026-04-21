@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from gallery.messages import (
     ImageAccepted,
@@ -89,3 +90,20 @@ def test_search_results_ready_fields():
     data = json.loads(m.to_json())
     assert data["request_id"] == "r1"
     assert "note" in data
+
+
+def test_search_requested_default_top_k():
+    m = SearchRequested(query="x")
+    assert m.top_k == 5
+    assert json.loads(m.to_json())["top_k"] == 5
+
+
+def test_message_timestamp_is_parseable_iso8601():
+    m = Message()
+    datetime.fromisoformat(m.timestamp.replace("Z", "+00:00"))
+
+
+def test_search_results_ready_serializes_results():
+    m = SearchResultsReady(request_id="r2", results=[{"id": "1", "score": 0.9}])
+    data = json.loads(m.to_json())
+    assert data["results"] == [{"id": "1", "score": 0.9}]

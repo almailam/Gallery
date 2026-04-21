@@ -85,6 +85,15 @@ def test_as_str_normalizes_redis_channel_keys():
     assert _as_str(b"gallery:image:upload_requested") == "gallery:image:upload_requested"
 
 
+def test_as_str_non_bytes_coerced_to_str():
+    assert _as_str(123) == "123"
+
+
+def test_ansi_for_unknown_message_type_uses_default():
+    unknown = "totally.unknown.type"
+    assert _ansi_for_message_type(unknown) == _ansi_for_message_type("also.unknown")
+
+
 def test_channels_constants():
     assert Channels.IMAGE_UPLOAD_REQUESTED == "gallery:image:upload_requested"
     assert Channels.IMAGE_ACCEPTED == "gallery:image:accepted"
