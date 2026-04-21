@@ -71,12 +71,19 @@ async def main() -> None:
     cli = CLIService(broker)
 
     # Run the broker listener and the interactive CLI concurrently.
+    # When the user quits the CLI, cancel the listener so the process can exit
+    # (broker.listen() would otherwise run forever).
+    listen_task = asyncio.create_task(broker.listen())
     try:
-        await asyncio.gather(
-            broker.listen(),
-            cli.run_interactive(),
-        )
+        await cli.run_interactive()
     finally:
+        listen_task.cancel()
+        try:
+            await listen_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.exception("Broker listener exited with error")
         await broker.disconnect()
         if redis_proc and redis_proc.returncode is None:
             redis_proc.terminate()

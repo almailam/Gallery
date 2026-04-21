@@ -126,7 +126,7 @@ class CLIService:
             line = line.strip()
             if not line:
                 continue
-            if line in ("quit", "exit", "q"):
+            if line.lower() in ("quit", "exit", "q"):
                 break
             parts = line.split(maxsplit=1)
             cmd, arg = parts[0].lower(), parts[1] if len(parts) > 1 else ""
