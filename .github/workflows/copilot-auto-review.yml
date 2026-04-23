@@ -1,12 +1,9 @@
 name: Copilot Auto Review
 
 on:
-  pull_request:
-    types:
-      - opened
-      - reopened
-      - ready_for_review
-      - synchronize
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -14,7 +11,6 @@ permissions:
 
 jobs:
   request-copilot-review:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +20,10 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const pull_number = context.payload.pull_request.number;
+            const commitShas = (context.payload.commits || []).map((c) => c.id);
+            if (commitShas.length === 0 && context.sha) {
+              commitShas.push(context.sha);
+            }
 
             const copilotLogins = [
               "copilot-pull-request-reviewer[bot]",
@@ -32,32 +31,66 @@ jobs:
               "github-copilot-for-pull-requests[bot]",
             ];
 
-            const pr = await github.rest.pulls.get({ owner, repo, pull_number });
-            const requested = (pr.data.requested_reviewers || [])
-              .map((reviewer) => reviewer.login);
-
-            if (requested.some((login) => copilotLogins.includes(login))) {
-              core.info("Copilot is already requested as a reviewer.");
-              return;
-            }
-
-            for (const reviewer of copilotLogins) {
+            const pullNumbers = new Set();
+            for (const sha of commitShas) {
               try {
-                await github.rest.pulls.requestReviewers({
+                const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
                   owner,
                   repo,
-                  pull_number,
-                  reviewers: [reviewer],
+                  commit_sha: sha,
                 });
-                core.info(`Requested Copilot review using reviewer '${reviewer}'.`);
-                return;
+                for (const pr of prs || []) {
+                  if (pr && pr.number) {
+                    pullNumbers.add(pr.number);
+                  }
+                }
               } catch (error) {
                 core.info(
-                  `Could not request reviewer '${reviewer}': ${error.status || "unknown"} ${error.message}`,
+                  `Could not resolve PRs for commit '${sha}': ${error.status || "unknown"} ${error.message}`,
                 );
               }
             }
 
-            core.warning(
-              'Unable to request Copilot automatically. Enable the repository ruleset option "Automatically request Copilot code review" with "Review new pushes".',
-            );
+            if (pullNumbers.size === 0) {
+              core.info("No PRs associated with pushed commits on main.");
+              return;
+            }
+
+            for (const pull_number of pullNumbers) {
+              const pr = await github.rest.pulls.get({ owner, repo, pull_number });
+
+              if (pr.data.state !== "open") {
+                core.info(`Skipping PR #${pull_number} because it is not open.`);
+                continue;
+              }
+
+              if (pr.data.draft) {
+                core.info(`Skipping PR #${pull_number} because it is draft.`);
+                continue;
+              }
+
+              const requested = (pr.data.requested_reviewers || [])
+                .map((reviewer) => reviewer.login);
+
+              if (requested.some((login) => copilotLogins.includes(login))) {
+                core.info(`Copilot is already requested on PR #${pull_number}.`);
+                continue;
+              }
+
+              for (const reviewer of copilotLogins) {
+                try {
+                  await github.rest.pulls.requestReviewers({
+                    owner,
+                    repo,
+                    pull_number,
+                    reviewers: [reviewer],
+                  });
+                  core.info(`Requested Copilot review on PR #${pull_number} using '${reviewer}'.`);
+                  break;
+                } catch (error) {
+                  core.info(
+                    `Could not request reviewer '${reviewer}' on PR #${pull_number}: ${error.status || "unknown"} ${error.message}`,
+                  );
+                }
+              }
+            }
