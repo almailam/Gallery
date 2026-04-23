@@ -1,17 +1,19 @@
-name: Unit Tests
+name: Models Integration Tests
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
 
 concurrency:
-  group: unit-tests-${{ github.ref }}
+  group: models-integration-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  test-models:
     runs-on: ubuntu-latest
+    env:
+      MODELS_TOKEN: ${{ secrets.MODELS_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -27,5 +29,5 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run tests
-        run: pytest --tb=short -m "not integration"
+      - name: Run GitHub Models integration tests
+        run: pytest --tb=short -m integration
