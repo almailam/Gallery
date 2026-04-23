@@ -9,11 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import ImagePipelineComplete, ImageStored
+from gallery.messages import ImageListReady, ImagePipelineComplete, ImageStored
 
 log = logging.getLogger(__name__)
 
 _DEFAULT_DB_PATH = Path("gallery_data") / "documents.json"
+_DEFAULT_VECTOR_DB_PATH = Path("gallery_data") / "vector_db.json"
 
 
 def _utc_now_iso() -> str:
@@ -23,9 +24,16 @@ def _utc_now_iso() -> str:
 class DocumentDBService:
     """Persists accepted image metadata to a single JSON file (keyed by image_id)."""
 
-    def __init__(self, broker: RedisBroker, *, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        broker: RedisBroker,
+        *,
+        db_path: Path | None = None,
+        vector_db_path: Path | None = None,
+    ) -> None:
         self.broker = broker
         self._db_path = db_path or _DEFAULT_DB_PATH
+        self._vector_db_path = vector_db_path or _DEFAULT_VECTOR_DB_PATH
         self._records: dict[str, dict] = {}
         self._lock = asyncio.Lock()
         self._load_from_disk()
@@ -49,6 +57,18 @@ class DocumentDBService:
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def _read_vector_records(self) -> dict[str, dict]:
+        if not self._vector_db_path.exists():
+            return {}
+        try:
+            raw = self._vector_db_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            records = data.get("records", {})
+            return records if isinstance(records, dict) else {}
+        except (OSError, json.JSONDecodeError) as e:
+            log.warning("[DocumentDB] Could not read vector DB %s: %s", self._vector_db_path, e)
+            return {}
 
     def _register_handlers(self) -> None:
         @self.broker.on(Channels.IMAGE_ACCEPTED)
@@ -92,3 +112,31 @@ class DocumentDBService:
                 image_id,
                 msg.get("path"),
             )
+
+        @self.broker.on(Channels.IMAGE_LIST_REQUESTED)
+        async def on_list_requested(msg: dict) -> None:
+            vector_by_id = self._read_vector_records()
+            async with self._lock:
+                snapshot = list(self._records.items())
+            images: list[dict] = []
+            for image_id, doc in snapshot:
+                vrec = vector_by_id.get(image_id, {}) if isinstance(vector_by_id, dict) else {}
+                annotations: list[str] = []
+                if isinstance(vrec, dict):
+                    raw_ann = vrec.get("annotations", [])
+                    if isinstance(raw_ann, list):
+                        annotations = [str(x) for x in raw_ann if str(x).strip()]
+                images.append(
+                    {
+                        "image_id": image_id,
+                        "path": doc.get("path", ""),
+                        "annotations": annotations,
+                        "updated_at": doc.get("updated_at", ""),
+                    }
+                )
+            images.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
+            await self.broker.publish(
+                Channels.IMAGE_LIST_READY,
+                ImageListReady(request_id=msg.get("id", ""), images=images),
+            )
+            log.info("[DocumentDB] list ready count=%s", len(images))

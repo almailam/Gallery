@@ -41,6 +41,8 @@ _TYPE_COLOR: dict[str, str] = {
     "image.embedding_requested": "\033[38;5;99m",  # purple
     "image.stored": "\033[38;5;118m",  # yellow-green
     "image.pipeline_complete": "\033[38;5;51m",  # cyan
+    "image.list_requested": "\033[38;5;75m",
+    "image.list_ready": "\033[38;5;81m",
     "search.requested": "\033[38;5;208m",  # dark orange
     "search.results_ready": "\033[35m",  # magenta
 }
@@ -95,6 +97,8 @@ class Channels:
     IMAGE_EMBEDDING_REQUESTED = "gallery:image:embedding_requested"
     IMAGE_STORED = "gallery:image:stored"
     IMAGE_PIPELINE_COMPLETE = "gallery:image:pipeline_complete"
+    IMAGE_LIST_REQUESTED = "gallery:image:list_requested"
+    IMAGE_LIST_READY = "gallery:image:list_ready"
     SEARCH_REQUESTED = "gallery:search:requested"
     SEARCH_RESULTS_READY = "gallery:search:results_ready"
 

@@ -61,6 +61,18 @@ class ImagePipelineComplete(Message):
 
 
 @dataclass
+class ImageListRequested(Message):
+    type: str = "image.list_requested"
+
+
+@dataclass
+class ImageListReady(Message):
+    type: str = "image.list_ready"
+    request_id: str = ""
+    images: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class SearchRequested(Message):
     type: str = "search.requested"
     query: str = ""
@@ -72,4 +84,4 @@ class SearchResultsReady(Message):
     type: str = "search.results_ready"
     request_id: str = ""
     results: list[dict] = field(default_factory=list)
-    note: str = "Search is not implemented yet."
+    note: str = ""

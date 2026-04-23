@@ -5,6 +5,8 @@ from gallery.messages import (
     ImageAccepted,
     ImageAnnotationRequested,
     ImageEmbeddingRequested,
+    ImageListReady,
+    ImageListRequested,
     ImagePipelineComplete,
     ImageStored,
     ImageUploadRequested,
@@ -74,6 +76,23 @@ def test_image_embedding_requested_fields():
     assert m.type == "image.embedding_requested"
     data = json.loads(m.to_json())
     assert data["path"] == "/img.jpg"
+
+
+def test_image_list_requested_type():
+    m = ImageListRequested()
+    assert m.type == "image.list_requested"
+
+
+def test_image_list_ready_fields():
+    m = ImageListReady(
+        request_id="r1",
+        images=[{"image_id": "i1", "path": "/a.jpg", "annotations": ["x"], "updated_at": "t"}],
+    )
+    assert m.type == "image.list_ready"
+    data = json.loads(m.to_json())
+    assert data["request_id"] == "r1"
+    assert len(data["images"]) == 1
+    assert data["images"][0]["annotations"] == ["x"]
 
 
 def test_search_requested_fields():

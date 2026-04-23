@@ -6,9 +6,15 @@ import asyncio
 import logging
 import shutil
 from contextlib import suppress
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from gallery.broker.pubsub import RedisBroker
 from gallery.services import CLIService, DocumentDBService, ImageService, VectorDBService
+
+_PROJECT_ROOT = Path(__file__).resolve().parent
+load_dotenv(_PROJECT_ROOT / ".env")
 
 logging.basicConfig(
     level=logging.INFO,

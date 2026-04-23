@@ -4,23 +4,44 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
 from pathlib import Path
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.completion import Completer, Completion, PathCompleter
 from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import ImageUploadRequested, SearchRequested
+from gallery.messages import ImageListRequested, ImageUploadRequested, SearchRequested
 
 log = logging.getLogger(__name__)
+
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_CYAN = "\033[38;5;51m"
+_GREEN = "\033[32m"
+_MAGENTA = "\033[35m"
+_DIM = "\033[2m"
+
+
+def _use_ansi_color() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
+
+
+def _c(text: str, color: str, *, bold: bool = False) -> str:
+    if not _use_ansi_color():
+        return text
+    prefix = f"{_BOLD}{color}" if bold else color
+    return f"{prefix}{text}{_RESET}"
 
 
 class _CLICompleter(Completer):
     """Tab completion for top-level commands and upload paths."""
 
-    _commands = ("upload", "search", "quit", "exit", "q")
+    _commands = ("upload", "search", "list", "quit", "exit", "q")
 
     def __init__(self) -> None:
         self._path_completer = PathCompleter(expanduser=True)
@@ -73,12 +94,52 @@ class CLIService:
 
         @self.broker.on(Channels.SEARCH_RESULTS_READY)
         async def on_search_results(msg: dict) -> None:
+            results = msg.get("results", [])
             print(
                 f"[CLI] search.results_ready request_id={msg.get('request_id')} "
-                f"count={len(msg.get('results', []))}"
+                f"count={len(results)}"
             )
+            for row in results:
+                ann = row.get("annotations") or []
+                ann_s = ", ".join(ann) if ann else "(none)"
+                print(
+                    f"  score={row.get('score')} id={row.get('image_id')} path={row.get('path')}\n"
+                    f"      annotations: {ann_s}"
+                )
             if msg.get("note"):
                 print(f"[CLI] {msg.get('note')}")
+
+        @self.broker.on(Channels.IMAGE_LIST_READY)
+        async def on_image_list(msg: dict) -> None:
+            images = msg.get("images", [])
+            if _use_ansi_color():
+                print_formatted_text(
+                    HTML(
+                        "<b><ansicyan>[CLI]</ansicyan></b> "
+                        "<ansicyan>image.list_ready</ansicyan> "
+                        f"count=<b><ansigreen>{len(images)}</ansigreen></b>"
+                    )
+                )
+            else:
+                print(f"[CLI] image.list_ready count={len(images)}")
+            for row in images:
+                ann = row.get("annotations") or []
+                ann_s = ", ".join(ann) if ann else "(none)"
+                if _use_ansi_color():
+                    print_formatted_text(
+                        HTML(
+                            f"  <style fg='ansibrightblack'>id=</style>"
+                            f"<ansimagenta>{row.get('image_id')}</ansimagenta> "
+                            f"<style fg='ansibrightblack'>path=</style>{row.get('path')}\n"
+                            f"      <style fg='ansibrightblack'>annotations:</style> "
+                            f"<ansigreen>{ann_s}</ansigreen>"
+                        )
+                    )
+                else:
+                    print(
+                        f"  id={row.get('image_id')} path={row.get('path')}\n"
+                        f"      annotations: {ann_s}"
+                    )
 
     async def upload_image(self, path: str) -> None:
         try:
@@ -112,12 +173,22 @@ class CLIService:
             return
         log.info("Requested search for %r", query)
 
+    async def list_images(self) -> None:
+        msg = ImageListRequested()
+        try:
+            await self.broker.publish(Channels.IMAGE_LIST_REQUESTED, msg)
+        except Exception as e:
+            print(f"[CLI] Error: could not request image list: {e}")
+            log.exception("List publish failed")
+            return
+        log.info("Requested image list")
+
     async def run_interactive(self) -> None:
         session = PromptSession(
             completer=_CLICompleter(),
             complete_while_typing=False,
         )
-        print("\nCommands:  upload <path>  |  search <query>  |  quit")
+        print("\nCommands:  upload <path>  |  search <query>  |  list  |  quit")
 
         while True:
             # Keep prompt responsive even while background event handlers print logs.
@@ -135,5 +206,7 @@ class CLIService:
                 await self.upload_image(arg)
             elif cmd == "search" and arg:
                 await self.search(arg)
+            elif cmd == "list":
+                await self.list_images()
             else:
-                print("Usage:  upload <path>  |  search <query>")
+                print("Usage:  upload <path>  |  search <query>  |  list")
