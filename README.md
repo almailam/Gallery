@@ -20,14 +20,16 @@
 ## Run Locally
 
 1. Install dependencies: `pip install -r requirements.txt`
-2. Start MongoDB, or set `MONGO_URI` to your MongoDB connection string.
+2. Start MongoDB, or set `MONGO_URI` to your MongoDB connection string. If MongoDB is unavailable, the app falls back to local JSON storage in `gallery_data/`.
 3. Run the app: `python main.py`
 
 Notes:
 
 - If Redis is not already running, the app will try to start `redis-server` automatically (if available in your environment).
-- Mongo defaults to `MONGO_URI=mongodb://localhost:27017` and `MONGO_DB=gallery`.
-- Metadata is stored in the `documents` collection, and annotation/search records are stored in the `vectors` collection.
+- Interactive commands and command results stay in the main terminal. Redis/debug messages stream in a separate macOS Terminal window and are also written to `gallery_data/debug.log`.
+- Set `GALLERY_OPEN_DEBUG_TERMINAL=0` to skip opening the second terminal, or `GALLERY_DEBUG_LOG=/path/to/debug.log` to choose a different log file.
+- Mongo defaults to `MONGO_URI=mongodb://localhost:27017` and `MONGO_DB=gallery`. Set `MONGO_TIMEOUT_MS` to adjust how long startup waits before falling back to JSON storage.
+- Metadata is stored in the `documents` collection, and annotation/search records are stored in the `vectors` collection. In JSON fallback mode, those are `gallery_data/documents.json` and `gallery_data/vector_db.json`.
 
 ```bash
 pip install -r requirements.txt
