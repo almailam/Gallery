@@ -1,10 +1,41 @@
-import json
 from unittest.mock import AsyncMock
 
 import pytest
 
 from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.services.document_db import DocumentDBService
+
+
+class _FakeAsyncCursor:
+    def __init__(self, records):
+        self._records = list(records)
+        self._index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._records):
+            raise StopAsyncIteration
+        value = self._records[self._index]
+        self._index += 1
+        return dict(value)
+
+
+class _FakeCollection:
+    def __init__(self, records=None):
+        self.records = records or {}
+
+    async def update_one(self, filter_doc, update_doc, *, upsert=False):
+        key = filter_doc["_id"]
+        if key not in self.records:
+            if not upsert:
+                return
+            self.records[key] = dict(update_doc.get("$setOnInsert", {}))
+        self.records[key].update(update_doc.get("$set", {}))
+
+    def find(self, filter_doc):
+        return _FakeAsyncCursor(self.records.values())
 
 
 @pytest.fixture
@@ -15,9 +46,9 @@ def broker():
 
 
 @pytest.mark.asyncio
-async def test_document_db_persists_accepted(tmp_path, broker):
-    db_path = tmp_path / "documents.json"
-    DocumentDBService(broker, db_path=db_path)
+async def test_document_db_persists_accepted(broker):
+    collection = _FakeCollection()
+    DocumentDBService(broker, collection=collection, vector_collection=_FakeCollection())
     handler = broker._handlers[Channels.IMAGE_ACCEPTED][0]
     await handler(
         {
@@ -28,16 +59,15 @@ async def test_document_db_persists_accepted(tmp_path, broker):
         }
     )
 
-    data = json.loads(db_path.read_text(encoding="utf-8"))
-    assert "img-1" in data["records"]
-    assert data["records"]["img-1"]["path"] == "/photos/a.jpg"
-    assert "updated_at" in data["records"]["img-1"]
+    assert "img-1" in collection.records
+    assert collection.records["img-1"]["path"] == "/photos/a.jpg"
+    assert "updated_at" in collection.records["img-1"]
 
 
 @pytest.mark.asyncio
-async def test_annotation_merges_with_prior_accept(tmp_path, broker):
-    db_path = tmp_path / "documents.json"
-    DocumentDBService(broker, db_path=db_path)
+async def test_annotation_merges_with_prior_accept(broker):
+    collection = _FakeCollection()
+    DocumentDBService(broker, collection=collection, vector_collection=_FakeCollection())
     on_ann = broker._handlers[Channels.IMAGE_ANNOTATION_REQUESTED][0]
     on_acc = broker._handlers[Channels.IMAGE_ACCEPTED][0]
 
@@ -50,27 +80,25 @@ async def test_annotation_merges_with_prior_accept(tmp_path, broker):
         }
     )
 
-    rec = json.loads(db_path.read_text(encoding="utf-8"))["records"]["img-2"]
+    rec = collection.records["img-2"]
     assert rec["path"] == "/b.jpg"
     assert "annotation_requested_at" in rec
 
 
 @pytest.mark.asyncio
-async def test_list_merges_vector_annotations(tmp_path, broker):
-    db_path = tmp_path / "documents.json"
-    vector_path = tmp_path / "vector_db.json"
-    vector_path.write_text(
-        json.dumps(
-            {
-                "records": {
-                    "img-1": {"annotations": ["apple", "fruit"], "path": "/a.jpg"},
-                }
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+async def test_list_merges_vector_annotations(broker):
+    collection = _FakeCollection()
+    vector_collection = _FakeCollection(
+        {
+            "img-1": {
+                "_id": "img-1",
+                "image_id": "img-1",
+                "annotations": ["apple", "fruit"],
+                "path": "/a.jpg",
+            }
+        }
     )
-    DocumentDBService(broker, db_path=db_path, vector_db_path=vector_path)
+    DocumentDBService(broker, collection=collection, vector_collection=vector_collection)
     on_acc = broker._handlers[Channels.IMAGE_ACCEPTED][0]
     await on_acc(
         {
@@ -83,6 +111,8 @@ async def test_list_merges_vector_annotations(tmp_path, broker):
     published: list[tuple[str, dict]] = []
 
     async def capture(channel: str, payload: str) -> None:
+        import json
+
         published.append((channel, json.loads(payload)))
 
     broker._client.publish = AsyncMock(side_effect=capture)

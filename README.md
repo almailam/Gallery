@@ -1,24 +1,26 @@
 # Gallery
 
-**Event-driven image annotation and retrieval** — a small system where services communicate over Redis pub-sub, persist image metadata and annotations to local JSON stores, and provide keyword-based search.
+**Event-driven image annotation and retrieval** — a small system where services communicate over Redis pub-sub, persist image metadata and annotations to MongoDB, and provide keyword-based search.
 
 ## Features
 
 - **Broker** — Redis pub-sub for events between services
 - **Services** — upload intake, document metadata persistence, annotation + search indexing, interactive CLI
-- **Storage** — JSON-backed local data files under `gallery_data/`
+- **Storage** — MongoDB collections for image metadata and annotation/search records
 - **Tests** — `pytest` test suite under `tests/`
 
 ## Prerequisites
 
 - Python 3.10+ recommended
 - Redis installed and available as `redis-server`
+- MongoDB running locally, or a MongoDB connection string
 
 ## Quick start
 
 1. Install dependencies: `pip install -r requirements.txt`
-2. Run the app: `python main.py`
-3. In the CLI, try commands like:
+2. Start MongoDB, or set `MONGO_URI` to your MongoDB connection string.
+3. Run the app: `python main.py`
+4. In the CLI, try commands like:
    - `upload samples/bananas.jpg`
    - `search bananas`
    - `quit`
@@ -26,7 +28,8 @@
 Notes:
 
 - If Redis is not already running, the app will try to start `redis-server` automatically (if available in your environment).
-- Metadata and index records are written to `gallery_data/documents.json` and `gallery_data/vector_db.json`.
+- Mongo defaults to `MONGO_URI=mongodb://localhost:27017` and `MONGO_DB=gallery`.
+- Metadata is stored in the `documents` collection, and annotation/search records are stored in the `vectors` collection.
 
 ## Usage examples
 

@@ -11,6 +11,42 @@ from gallery.services.vector_db import (
 )
 
 
+class _FakeAsyncCursor:
+    def __init__(self, records):
+        self._records = list(records)
+        self._index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._records):
+            raise StopAsyncIteration
+        value = self._records[self._index]
+        self._index += 1
+        return dict(value)
+
+
+class _FakeCollection:
+    def __init__(self, records=None):
+        self.records = records or {}
+
+    async def find_one(self, filter_doc):
+        record = self.records.get(filter_doc["_id"])
+        return dict(record) if record else None
+
+    async def update_one(self, filter_doc, update_doc, *, upsert=False):
+        key = filter_doc["_id"]
+        if key not in self.records:
+            if not upsert:
+                return
+            self.records[key] = dict(update_doc.get("$setOnInsert", {}))
+        self.records[key].update(update_doc.get("$set", {}))
+
+    def find(self, filter_doc):
+        return _FakeAsyncCursor(self.records.values())
+
+
 @pytest.fixture
 def broker():
     b = RedisBroker()
@@ -19,25 +55,19 @@ def broker():
 
 
 @pytest.mark.asyncio
-async def test_embedding_reuses_stored_annotations_without_model_call(tmp_path, broker):
-    db_path = tmp_path / "vector_db.json"
-    db_path.write_text(
-        json.dumps(
-            {
-                "records": {
-                    "img-1": {
-                        "image_id": "img-1",
-                        "path": "/old.jpg",
-                        "annotations": ["apple", "fruit"],
-                        "search_text": "apple fruit",
-                    }
-                }
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+async def test_embedding_reuses_stored_annotations_without_model_call(broker):
+    collection = _FakeCollection(
+        {
+            "img-1": {
+                "_id": "img-1",
+                "image_id": "img-1",
+                "path": "/old.jpg",
+                "annotations": ["apple", "fruit"],
+                "search_text": "apple fruit",
+            }
+        }
     )
-    svc = VectorDBService(broker, db_path=db_path)
+    svc = VectorDBService(broker, collection=collection)
     handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
 
     with patch.object(svc, "_annotate_image", new_callable=AsyncMock) as mock_ann:
@@ -45,16 +75,14 @@ async def test_embedding_reuses_stored_annotations_without_model_call(tmp_path, 
         await handler({"image_id": "img-1", "path": "/new.jpg", "type": "image.embedding_requested"})
         mock_ann.assert_not_awaited()
 
-    data = json.loads(db_path.read_text(encoding="utf-8"))
-    assert data["records"]["img-1"]["annotations"] == ["apple", "fruit"]
-    assert data["records"]["img-1"]["path"] == "/new.jpg"
+    assert collection.records["img-1"]["annotations"] == ["apple", "fruit"]
+    assert collection.records["img-1"]["path"] == "/new.jpg"
 
 
 @pytest.mark.asyncio
-async def test_embedding_calls_model_once_then_reuses_for_same_image_id(tmp_path, broker):
-    db_path = tmp_path / "vector_db.json"
-    db_path.write_text(json.dumps({"records": {}}, ensure_ascii=False), encoding="utf-8")
-    svc = VectorDBService(broker, db_path=db_path)
+async def test_embedding_calls_model_once_then_reuses_for_same_image_id(broker):
+    collection = _FakeCollection()
+    svc = VectorDBService(broker, collection=collection)
     handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
 
     with patch.object(svc, "_annotate_image", new_callable=AsyncMock) as mock_ann:
@@ -66,12 +94,11 @@ async def test_embedding_calls_model_once_then_reuses_for_same_image_id(tmp_path
 
 @pytest.mark.asyncio
 async def test_embedding_reuses_annotations_for_same_file_path_different_id(tmp_path, broker):
-    db_path = tmp_path / "vector_db.json"
-    db_path.write_text(json.dumps({"records": {}}, ensure_ascii=False), encoding="utf-8")
+    collection = _FakeCollection()
     image_file = tmp_path / "same.jpg"
     image_file.write_bytes(b"\xff\xd8\xff")
 
-    svc = VectorDBService(broker, db_path=db_path)
+    svc = VectorDBService(broker, collection=collection)
     handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
 
     with patch.object(svc, "_annotate_image", new_callable=AsyncMock) as mock_ann:
@@ -84,8 +111,45 @@ async def test_embedding_reuses_annotations_for_same_file_path_different_id(tmp_
         )
         assert mock_ann.await_count == 1
 
-    data = json.loads(db_path.read_text(encoding="utf-8"))
-    assert data["records"]["second"]["annotations"] == ["sky", "clouds"]
+    assert collection.records["second"]["annotations"] == ["sky", "clouds"]
+
+
+@pytest.mark.asyncio
+async def test_search_returns_scored_mongo_records(broker):
+    collection = _FakeCollection(
+        {
+            "img-1": {
+                "_id": "img-1",
+                "image_id": "img-1",
+                "path": "/photos/apple.jpg",
+                "annotations": ["apple", "fruit"],
+                "search_text": "apple fruit",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+        }
+    )
+    VectorDBService(broker, collection=collection)
+    handler = broker._handlers[Channels.SEARCH_REQUESTED][0]
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    await handler({"type": "search.requested", "id": "req-1", "query": "apple", "top_k": 5})
+
+    assert len(published) == 1
+    channel, body = published[0]
+    assert channel == Channels.SEARCH_RESULTS_READY
+    assert body["request_id"] == "req-1"
+    assert body["results"] == [
+        {
+            "image_id": "img-1",
+            "path": "/photos/apple.jpg",
+            "annotations": ["apple", "fruit"],
+            "score": 1,
+        }
+    ]
 
 
 def test_message_content_to_text_supports_part_list():

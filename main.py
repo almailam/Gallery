@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from contextlib import suppress
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pymongo import AsyncMongoClient
 
 from gallery.broker.pubsub import RedisBroker
 from gallery.services import CLIService, DocumentDBService, ImageService, VectorDBService
@@ -55,6 +57,7 @@ async def _start_redis_server() -> asyncio.subprocess.Process | None:
 async def main() -> None:
     broker = RedisBroker()
     redis_proc: asyncio.subprocess.Process | None = None
+    mongo_client: AsyncMongoClient | None = None
 
     connected = await _try_connect(broker, attempts=2)
     if not connected:
@@ -70,10 +73,13 @@ async def main() -> None:
         )
         raise SystemExit(1)
 
+    mongo_client = AsyncMongoClient(os.environ.get("MONGO_URI", "mongodb://localhost:27017"))
+    mongo_db = mongo_client[os.environ.get("MONGO_DB", "gallery")]
+
     # Instantiate services - each one registers its own handlers on the broker.
     ImageService(broker)
-    DocumentDBService(broker)
-    VectorDBService(broker)
+    DocumentDBService(broker, collection=mongo_db.documents, vector_collection=mongo_db.vectors)
+    VectorDBService(broker, collection=mongo_db.vectors)
     cli = CLIService(broker)
 
     # Run the broker listener and the interactive CLI concurrently.
@@ -91,6 +97,8 @@ async def main() -> None:
         except Exception:
             log.exception("Broker listener exited with error")
         await broker.disconnect()
+        if mongo_client is not None:
+            await mongo_client.close()
         if redis_proc and redis_proc.returncode is None:
             redis_proc.terminate()
             with suppress(ProcessLookupError):

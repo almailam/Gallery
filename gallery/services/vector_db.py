@@ -1,4 +1,4 @@
-"""Vector DB service with simple annotation-backed search."""
+"""Vector DB service with Mongo-backed annotation search."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib import error, request
 
 from gallery.broker.pubsub import Channels, RedisBroker
@@ -16,7 +17,6 @@ from gallery.messages import SearchResultsReady
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_VECTOR_DB_PATH = Path("gallery_data") / "vector_db.json"
 _GITHUB_MODELS_CHAT_COMPLETIONS_URL = "https://models.github.ai/inference/chat/completions"
 _GITHUB_MODELS_MODEL = "openai/gpt-4.1-mini"
 
@@ -84,32 +84,10 @@ def _parse_annotations_from_model_text(text: str) -> list[str]:
 
 
 class VectorDBService:
-    def __init__(self, broker: RedisBroker, *, db_path: Path | None = None) -> None:
+    def __init__(self, broker: RedisBroker, *, collection: Any | None = None) -> None:
         self.broker = broker
-        self._db_path = db_path or _DEFAULT_VECTOR_DB_PATH
-        self._records: dict[str, dict] = {}
-        self._lock = asyncio.Lock()
-        self._load_from_disk()
+        self._collection = collection
         self._register_handlers()
-
-    def _load_from_disk(self) -> None:
-        if not self._db_path.exists():
-            return
-        try:
-            raw = self._db_path.read_text(encoding="utf-8")
-            data = json.loads(raw)
-            self._records = data.get("records", {})
-            log.info("[VectorDB] Loaded %s records from %s", len(self._records), self._db_path)
-        except (OSError, json.JSONDecodeError) as e:
-            log.warning("[VectorDB] Could not load %s: %s", self._db_path, e)
-
-    def _flush_to_disk_locked(self) -> None:
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"records": self._records}
-        self._db_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
 
     async def _annotate_image(self, path: str) -> list[str]:
         token = os.environ.get("MODELS_TOKEN", "")
@@ -201,19 +179,24 @@ class VectorDBService:
         with request.urlopen(req, timeout=120) as resp:
             return resp.read().decode("utf-8")
 
-    def _cached_annotations_for_image(self, image_id: str) -> list[str] | None:
-        prior = self._records.get(image_id, {})
+    async def _cached_annotations_for_image(self, image_id: str) -> list[str] | None:
+        if self._collection is None:
+            return None
+        prior = await self._collection.find_one({"_id": image_id}) or {}
         ann = _normalize_annotation_list(prior.get("annotations"))
         return ann if ann else None
 
-    def _cached_annotations_for_same_path(self, path: str, exclude_id: str) -> list[str] | None:
+    async def _cached_annotations_for_same_path(self, path: str, exclude_id: str) -> list[str] | None:
+        if self._collection is None:
+            return None
         if not path:
             return None
         try:
             target = str(Path(path).expanduser().resolve())
         except (OSError, RuntimeError):
             target = path
-        for rid, rec in self._records.items():
+        async for rec in self._collection.find({}):
+            rid = rec.get("image_id") or rec.get("_id")
             if rid == exclude_id:
                 continue
             other_path = rec.get("path", "")
@@ -238,12 +221,14 @@ class VectorDBService:
             if not image_id:
                 log.warning("[VectorDB] embedding requested missing image_id")
                 return
+            if self._collection is None:
+                log.warning("[VectorDB] no Mongo collection configured")
+                return
 
-            async with self._lock:
-                reuse = self._cached_annotations_for_image(image_id)
-                if reuse is None:
-                    reuse = self._cached_annotations_for_same_path(path, image_id)
-                from_cache = reuse is not None
+            reuse = await self._cached_annotations_for_image(image_id)
+            if reuse is None:
+                reuse = await self._cached_annotations_for_same_path(path, image_id)
+            from_cache = reuse is not None
 
             if from_cache:
                 annotations = reuse
@@ -255,17 +240,20 @@ class VectorDBService:
                 annotations = await self._annotate_image(path)
 
             search_text = " ".join(annotations)
-            async with self._lock:
-                prior = self._records.get(image_id, {})
-                self._records[image_id] = {
-                    **prior,
-                    "image_id": image_id,
-                    "path": path,
-                    "annotations": annotations,
-                    "search_text": search_text,
-                    "updated_at": _utc_now_iso(),
-                }
-                self._flush_to_disk_locked()
+            await self._collection.update_one(
+                {"_id": image_id},
+                {
+                    "$set": {
+                        "image_id": image_id,
+                        "path": path,
+                        "annotations": annotations,
+                        "search_text": search_text,
+                        "updated_at": _utc_now_iso(),
+                    },
+                    "$setOnInsert": {"_id": image_id},
+                },
+                upsert=True,
+            )
             log.info(
                 "[VectorDB] stored image_id=%s annotations=%s",
                 image_id,
@@ -277,16 +265,18 @@ class VectorDBService:
             query = msg.get("query", "")
             top_k = msg.get("top_k", 5)
             query_tokens = [t for t in query.lower().split() if t]
+            if self._collection is None:
+                log.warning("[VectorDB] no Mongo collection configured")
+                return
 
-            async with self._lock:
-                scored: list[tuple[int, dict]] = []
-                for record in self._records.values():
-                    searchable = (
-                        f"{record.get('search_text', '')} {Path(record.get('path', '')).name}"
-                    ).lower()
-                    score = sum(1 for token in query_tokens if token in searchable)
-                    if score > 0 or not query_tokens:
-                        scored.append((score, record))
+            scored: list[tuple[int, dict]] = []
+            async for record in self._collection.find({}):
+                searchable = (
+                    f"{record.get('search_text', '')} {Path(record.get('path', '')).name}"
+                ).lower()
+                score = sum(1 for token in query_tokens if token in searchable)
+                if score > 0 or not query_tokens:
+                    scored.append((score, record))
 
             scored.sort(
                 key=lambda item: (
