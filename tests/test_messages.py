@@ -108,7 +108,8 @@ def test_search_results_ready_fields():
     assert m.type == "search.results_ready"
     data = json.loads(m.to_json())
     assert data["request_id"] == "r1"
-    assert "note" in data
+    assert data["results"] == []
+    assert "note" not in data
 
 
 def test_search_requested_default_top_k():
