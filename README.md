@@ -53,6 +53,25 @@ search bananas
 quit
 ```
 
+## Event generator (simple simulation)
+
+Use the standalone generator to trigger specific event types and inspect both sent and observed messages.
+
+1. Start the app in one terminal: `python main.py`
+2. In a second terminal, run for example:
+
+```bash
+python event_generator.py --events upload,search,list --count 2 --query fruit
+```
+
+Useful options:
+
+- `--events upload,search,list` choose which events to trigger and order.
+- `--count 3` repeat that event sequence N times.
+- `--delay 0.2` pause between each trigger.
+- `--upload-paths samples/bananas.jpg samples/apple.jpeg` rotate upload paths.
+- `--observe-seconds 2` keep listening briefly for resulting messages.
+
 ## Development
 
 ```bash
