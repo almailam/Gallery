@@ -31,6 +31,15 @@ def _normalize_annotation_list(raw: object) -> list[str]:
     return [str(x).strip() for x in raw if str(x).strip()]
 
 
+def _has_doubled_final_consonant(stem: str) -> bool:
+    """Return True when *stem* ends with a doubled non-vowel character (e.g. 'runn', 'stopp')."""
+    return (
+        len(stem) >= 2
+        and stem[-1] == stem[-2]
+        and stem[-1] not in "aeiou"
+    )
+
+
 def _stem(word: str) -> str:
     """Strip common English inflectional suffixes for fuzzy search matching.
 
@@ -43,14 +52,13 @@ def _stem(word: str) -> str:
     # ing: running → run, jumping → jump
     if len(w) > 5 and w.endswith("ing"):
         stem = w[:-3]
-        # collapsed double consonant: running → runn → run
-        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+        if _has_doubled_final_consonant(stem):
             stem = stem[:-1]
         return stem if len(stem) >= 3 else w
     # ed: walked → walk, stopped → stop
     if len(w) > 4 and w.endswith("ed"):
         stem = w[:-2]
-        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+        if _has_doubled_final_consonant(stem):
             stem = stem[:-1]
         return stem if len(stem) >= 3 else w
     # s (not ss): dogs → dog, beaches → beach
