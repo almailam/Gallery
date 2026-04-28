@@ -1,4 +1,4 @@
-"""Pub/sub message types for the messaging-only architecture."""
+"""Event message contracts exchanged over Redis pub/sub."""
 
 from __future__ import annotations
 
@@ -84,4 +84,3 @@ class SearchResultsReady(Message):
     type: str = "search.results_ready"
     request_id: str = ""
     results: list[dict] = field(default_factory=list)
-    note: str = ""
