@@ -31,6 +31,49 @@ def _normalize_annotation_list(raw: object) -> list[str]:
     return [str(x).strip() for x in raw if str(x).strip()]
 
 
+def _stem(word: str) -> str:
+    """Strip common English inflectional suffixes for fuzzy search matching.
+
+    Examples: dogs→dog, beaches→beach, running→run, walked→walk, puppies→puppy.
+    """
+    w = word.lower()
+    # ies → y: puppies → puppy
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    # ing: running → run, jumping → jump
+    if len(w) > 5 and w.endswith("ing"):
+        stem = w[:-3]
+        # collapsed double consonant: running → runn → run
+        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+            stem = stem[:-1]
+        return stem if len(stem) >= 3 else w
+    # ed: walked → walk, stopped → stop
+    if len(w) > 4 and w.endswith("ed"):
+        stem = w[:-2]
+        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+            stem = stem[:-1]
+        return stem if len(stem) >= 3 else w
+    # s (not ss): dogs → dog, beaches → beach
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _token_matches(query_token: str, searchable: str, searchable_tokens: frozenset[str]) -> bool:
+    """Return True when *query_token* matches the searchable text.
+
+    Matching rules (in order):
+    1. Exact substring – preserves current behaviour including partial filename matches.
+    2. Stem equality – ``_stem(query_token)`` is compared against ``_stem(t)`` for
+       every word-token in the searchable text so that inflected variants such as
+       "dogs" / "dog" or "running" / "run" are treated as equivalent.
+    """
+    if query_token in searchable:
+        return True
+    q_stem = _stem(query_token)
+    return any(q_stem == _stem(t) for t in searchable_tokens)
+
+
 def _message_content_to_text(message: dict) -> str:
     """OpenAI-compatible APIs may return message.content as a string or a list of parts."""
     raw = message.get("content")
@@ -284,7 +327,12 @@ class VectorDBService:
                     searchable = (
                         f"{record.get('search_text', '')} {Path(record.get('path', '')).name}"
                     ).lower()
-                    score = sum(1 for token in query_tokens if token in searchable)
+                    searchable_tokens: frozenset[str] = frozenset(searchable.split())
+                    score = sum(
+                        1
+                        for token in query_tokens
+                        if _token_matches(token, searchable, searchable_tokens)
+                    )
                     if score > 0 or not query_tokens:
                         scored.append((score, record))
 
