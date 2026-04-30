@@ -15,8 +15,11 @@ from gallery.messages import ImageEmbeddingFailed, SearchResultsReady, StorageCl
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_EMBEDDING_MODEL = "clip-ViT-B-32"
-_DEFAULT_SEARCH_MIN_SCORE = 0.24
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_EMBEDDING_MODEL = "clip-ViT-L-14"
+_DEFAULT_MODEL_CACHE_DIR = _PROJECT_ROOT / ".gallery_models"
+_DEFAULT_SEARCH_MIN_SCORE = 0.0
+_FILENAME_MATCH_BONUS = 0.35
 
 
 def _utc_now_iso() -> str:
@@ -25,6 +28,27 @@ def _utc_now_iso() -> str:
 
 def _embedding_model_name() -> str:
     return os.environ.get("GALLERY_EMBEDDING_MODEL", _DEFAULT_EMBEDDING_MODEL).strip() or _DEFAULT_EMBEDDING_MODEL
+
+
+def _embedding_model_cache_dir() -> Path:
+    configured = os.environ.get("GALLERY_EMBEDDING_MODEL_CACHE", "")
+    if configured.strip():
+        return Path(configured).expanduser()
+    return _DEFAULT_MODEL_CACHE_DIR
+
+
+def _embedding_model_repo_id(model_name: str) -> str:
+    if "/" in model_name:
+        return model_name
+    return f"sentence-transformers/{model_name}"
+
+
+def _safe_model_dir_name(model_name: str) -> str:
+    return _embedding_model_repo_id(model_name).replace("/", "__")
+
+
+def _preload_embedding_model() -> bool:
+    return os.environ.get("GALLERY_PRELOAD_EMBEDDING_MODEL", "1").strip() != "0"
 
 
 def _search_min_score() -> float:
@@ -63,6 +87,30 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     return dot / (left_norm * right_norm)
 
 
+def _query_variants(query: str) -> list[str]:
+    normalized = " ".join(query.split())
+    if not normalized:
+        return []
+    return [
+        normalized,
+        f"a photo of {normalized}",
+        f"a picture of {normalized}",
+        f"an image of {normalized}",
+    ]
+
+
+def _filename_match_score(query: str, path: str) -> float:
+    query_tokens = {token for token in query.lower().replace("_", " ").replace("-", " ").split() if token}
+    if not query_tokens:
+        return 0.0
+    name = Path(path).stem.lower().replace("_", " ").replace("-", " ")
+    if query.lower().strip() and query.lower().strip() in name:
+        return _FILENAME_MATCH_BONUS
+    if any(token in name for token in query_tokens):
+        return _FILENAME_MATCH_BONUS
+    return 0.0
+
+
 class VectorDBService:
     def __init__(
         self,
@@ -76,16 +124,83 @@ class VectorDBService:
         self._collection = collection
         self._embedding_model = embedding_model
         self._embedding_model_name = embedding_model_name or _embedding_model_name()
+        self._embedding_model_cache_dir = _embedding_model_cache_dir()
         self._search_min_score = _search_min_score()
         self._last_embedding_error = ""
         self._register_handlers()
+
+    def _download_model_path(self) -> Path:
+        return self._embedding_model_cache_dir / _safe_model_dir_name(self._embedding_model_name)
+
+    def _cached_hf_snapshot_path(self) -> Path | None:
+        repo_cache = self._embedding_model_cache_dir / (
+            "models--" + _embedding_model_repo_id(self._embedding_model_name).replace("/", "--")
+        )
+        snapshots_dir = repo_cache / "snapshots"
+        if not snapshots_dir.is_dir():
+            return None
+        snapshots = sorted(
+            (
+                path
+                for path in snapshots_dir.iterdir()
+                if path.is_dir() and (path / "modules.json").is_file()
+            ),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        return snapshots[0] if snapshots else None
+
+    def _local_model_path(self) -> Path:
+        configured = Path(self._embedding_model_name).expanduser()
+        if configured.exists():
+            return configured
+        cached_snapshot = self._cached_hf_snapshot_path()
+        if cached_snapshot is not None:
+            return cached_snapshot
+        return self._download_model_path()
+
+    def _ensure_local_model(self) -> Path:
+        local_model_path = self._local_model_path()
+        if (local_model_path / "modules.json").is_file():
+            return local_model_path
+
+        from huggingface_hub import snapshot_download
+
+        local_model_path = self._download_model_path()
+        local_model_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=_embedding_model_repo_id(self._embedding_model_name),
+            local_dir=str(local_model_path),
+        )
+        return local_model_path
 
     def _model(self) -> Any:
         if self._embedding_model is None:
             from sentence_transformers import SentenceTransformer
 
-            self._embedding_model = SentenceTransformer(self._embedding_model_name)
+            self._embedding_model_cache_dir.mkdir(parents=True, exist_ok=True)
+            self._embedding_model = SentenceTransformer(str(self._ensure_local_model()))
         return self._embedding_model
+
+    async def prepare_model(self) -> bool:
+        if not _preload_embedding_model():
+            return False
+        try:
+            await asyncio.to_thread(self._model)
+            log.info(
+                "[VectorDB] embedding model ready model=%s cache=%s",
+                self._embedding_model_name,
+                self._local_model_path(),
+            )
+            return True
+        except ImportError as e:
+            self._last_embedding_error = f"embedding dependencies are unavailable: {e}"
+            log.warning("[VectorDB] Embedding dependencies are unavailable: %s", e)
+            return False
+        except Exception as e:
+            self._last_embedding_error = f"embedding model preload failed: {e}"
+            log.warning("[VectorDB] Embedding model preload failed: %s", e)
+            return False
 
     @staticmethod
     def _vector_to_list(vector: Any) -> list[float]:
@@ -127,15 +242,20 @@ class VectorDBService:
     async def _embed_image(self, path: str) -> list[float]:
         return await asyncio.to_thread(self._encode_image_sync, path)
 
-    def _encode_text_sync(self, query: str) -> list[float]:
+    def _encode_text_sync(self, query: str) -> list[list[float]]:
         try:
-            vector = self._model().encode(
-                query,
+            variants = _query_variants(query)
+            if not variants:
+                return []
+            vectors = self._model().encode(
+                variants,
                 convert_to_numpy=True,
                 normalize_embeddings=True,
                 show_progress_bar=False,
             )
-            return self._vector_to_list(vector)
+            if hasattr(vectors, "tolist"):
+                vectors = vectors.tolist()
+            return [self._vector_to_list(vector) for vector in vectors]
         except ImportError as e:
             self._last_embedding_error = f"embedding dependencies are unavailable: {e}"
             log.warning("[VectorDB] Embedding dependencies are unavailable: %s", e)
@@ -145,7 +265,7 @@ class VectorDBService:
             log.warning("[VectorDB] Text embedding failed for query=%r: %s", query, e)
             return []
 
-    async def _embed_text(self, query: str) -> list[float]:
+    async def _embed_text(self, query: str) -> list[list[float]]:
         return await asyncio.to_thread(self._encode_text_sync, query)
 
     def _embedding_from_record(self, record: dict) -> list[float] | None:
@@ -281,14 +401,22 @@ class VectorDBService:
                 log.warning("[VectorDB] no Mongo collection configured")
                 return
 
-            query_embedding = await self._embed_text(query) if query.strip() else []
+            query_embeddings = await self._embed_text(query) if query.strip() else []
             scored: list[tuple[float, dict]] = []
             async for record in self._collection.find({}):
                 embedding = await self._embedding_for_search_record(record)
                 if not embedding:
                     continue
-                score = _cosine_similarity(query_embedding, embedding) if query_embedding else 0.0
-                if not query_embedding or score >= self._search_min_score:
+                if query_embeddings:
+                    semantic_score = max(
+                        _cosine_similarity(query_embedding, embedding)
+                        for query_embedding in query_embeddings
+                    )
+                    filename_score = _filename_match_score(query, str(record.get("path", "")))
+                    score = max(semantic_score, filename_score)
+                else:
+                    score = 0.0
+                if not query_embeddings or score >= self._search_min_score:
                     scored.append((score, record))
 
             scored.sort(

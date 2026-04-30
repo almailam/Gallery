@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+.gallery_models/
 dump.rdb
 gallery_data/
 .env

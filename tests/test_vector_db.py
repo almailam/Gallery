@@ -7,7 +7,13 @@ from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.services.vector_db import (
     VectorDBService,
     _cosine_similarity,
+    _embedding_model_cache_dir,
+    _embedding_model_name,
+    _embedding_model_repo_id,
+    _filename_match_score,
     _normalize_embedding,
+    _query_variants,
+    _safe_model_dir_name,
 )
 
 
@@ -182,7 +188,7 @@ async def test_search_returns_similarity_ranked_records(broker):
 
     broker._client.publish = AsyncMock(side_effect=capture)
     with patch.object(svc, "_embed_text", new_callable=AsyncMock) as mock_embed_text:
-        mock_embed_text.return_value = [1.0, 0.0]
+        mock_embed_text.return_value = [[1.0, 0.0]]
         await handler({"type": "search.requested", "id": "req-1", "query": "apple", "top_k": 5})
 
     assert len(published) == 1
@@ -220,7 +226,7 @@ async def test_search_filters_results_below_similarity_threshold(broker):
 
     broker._client.publish = AsyncMock(side_effect=capture)
     with patch.object(svc, "_embed_text", new_callable=AsyncMock) as mock_embed_text:
-        mock_embed_text.return_value = [1.0, 0.0]
+        mock_embed_text.return_value = [[1.0, 0.0]]
         await handler({"type": "search.requested", "id": "req-1", "query": "apple", "top_k": 5})
 
     assert published[0][1]["results"] == []
@@ -249,7 +255,7 @@ async def test_search_backfills_legacy_record_embedding(broker):
         patch.object(svc, "_embed_text", new_callable=AsyncMock) as mock_embed_text,
         patch.object(svc, "_embed_image", new_callable=AsyncMock) as mock_embed_image,
     ):
-        mock_embed_text.return_value = [1.0, 0.0]
+        mock_embed_text.return_value = [[1.0, 0.0]]
         mock_embed_image.return_value = [1.0, 0.0]
         await handler({"type": "search.requested", "id": "req-1", "query": "apple", "top_k": 5})
 
@@ -281,7 +287,7 @@ async def test_search_skips_unusable_records_for_other_embedding_models(broker):
 
     broker._client.publish = AsyncMock(side_effect=capture)
     with patch.object(svc, "_embed_text", new_callable=AsyncMock) as mock_embed_text:
-        mock_embed_text.return_value = [1.0, 0.0]
+        mock_embed_text.return_value = [[1.0, 0.0]]
         await handler({"type": "search.requested", "id": "req-1", "query": "apple", "top_k": 5})
 
     assert published[0][1]["results"] == []
@@ -297,6 +303,94 @@ def test_cosine_similarity_handles_vectors():
     assert _cosine_similarity([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
     assert _cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
     assert _cosine_similarity([1.0], [1.0, 0.0]) == 0.0
+
+
+def test_query_variants_include_clip_friendly_prompts():
+    assert _query_variants("  red dog  ") == [
+        "red dog",
+        "a photo of red dog",
+        "a picture of red dog",
+        "an image of red dog",
+    ]
+
+
+def test_filename_match_score_boosts_path_name_matches():
+    assert _filename_match_score("patrick", "/photos/patrick.png") > 0
+    assert _filename_match_score("red dog", "/photos/red-dog.jpg") > 0
+    assert _filename_match_score("cat", "/photos/red-dog.jpg") == 0.0
+
+
+def test_embedding_defaults_use_larger_local_model_cache(monkeypatch):
+    monkeypatch.delenv("GALLERY_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("GALLERY_EMBEDDING_MODEL_CACHE", raising=False)
+
+    assert _embedding_model_name() == "clip-ViT-L-14"
+    assert _embedding_model_cache_dir().name == ".gallery_models"
+
+
+def test_model_repo_and_local_dir_names():
+    assert _embedding_model_repo_id("clip-ViT-L-14") == "sentence-transformers/clip-ViT-L-14"
+    assert _embedding_model_repo_id("org/model") == "org/model"
+    assert _safe_model_dir_name("clip-ViT-L-14") == "sentence-transformers__clip-ViT-L-14"
+
+
+def test_local_model_path_uses_configured_cache(broker, tmp_path, monkeypatch):
+    monkeypatch.setenv("GALLERY_EMBEDDING_MODEL_CACHE", str(tmp_path / "models"))
+    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="clip-ViT-L-14")
+
+    assert svc._local_model_path() == tmp_path / "models" / "sentence-transformers__clip-ViT-L-14"
+
+
+def test_local_model_path_reuses_huggingface_snapshot_cache(broker, tmp_path, monkeypatch):
+    monkeypatch.setenv("GALLERY_EMBEDDING_MODEL_CACHE", str(tmp_path / "models"))
+    snapshot = (
+        tmp_path
+        / "models"
+        / "models--sentence-transformers--clip-ViT-L-14"
+        / "snapshots"
+        / "abc123"
+    )
+    snapshot.mkdir(parents=True)
+    (snapshot / "modules.json").write_text("{}", encoding="utf-8")
+    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="clip-ViT-L-14")
+
+    assert svc._local_model_path() == snapshot
+
+
+def test_ensure_local_model_reuses_downloaded_snapshot(broker, tmp_path, monkeypatch):
+    monkeypatch.setenv("GALLERY_EMBEDDING_MODEL_CACHE", str(tmp_path / "models"))
+    local_model = tmp_path / "models" / "sentence-transformers__clip-ViT-L-14"
+    local_model.mkdir(parents=True)
+    (local_model / "modules.json").write_text("{}", encoding="utf-8")
+    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="clip-ViT-L-14")
+
+    with patch("huggingface_hub.snapshot_download") as mock_snapshot:
+        assert svc._ensure_local_model() == local_model
+        mock_snapshot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_loads_model_once_when_enabled(broker, tmp_path, monkeypatch):
+    monkeypatch.setenv("GALLERY_PRELOAD_EMBEDDING_MODEL", "1")
+    monkeypatch.setenv("GALLERY_EMBEDDING_MODEL_CACHE", str(tmp_path / "models"))
+    model = object()
+    svc = VectorDBService(
+        broker,
+        collection=_FakeCollection(),
+        embedding_model=model,
+        embedding_model_name="test-model",
+    )
+
+    assert await svc.prepare_model() is True
+    assert svc._model() is model
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_can_be_disabled(broker, monkeypatch):
+    monkeypatch.setenv("GALLERY_PRELOAD_EMBEDDING_MODEL", "0")
+    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="test-model")
+
+    assert await svc.prepare_model() is False
 
 
 @pytest.mark.asyncio

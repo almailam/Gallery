@@ -30,7 +30,8 @@ Notes:
 - Set `GALLERY_OPEN_DEBUG_TERMINAL=0` to skip opening the second terminal, or `GALLERY_DEBUG_LOG=/path/to/debug.log` to choose a different log file.
 - Mongo defaults to `MONGO_URI=mongodb://localhost:27017` and `MONGO_DB=gallery`. Set `MONGO_TIMEOUT_MS` to adjust how long startup waits before falling back to JSON storage.
 - Metadata is stored in the `documents` collection, and embedding/search records are stored in the `vectors` collection. In JSON fallback mode, those are `gallery_data/documents.json` and `gallery_data/vector_db.json`.
-- Image and text embeddings are generated locally with a CLIP-compatible `sentence-transformers` model. The default model is `clip-ViT-B-32`; set `GALLERY_EMBEDDING_MODEL` to use a different local/Hugging Face model. The first run may download model weights.
+- Image and text embeddings are generated locally with a CLIP-compatible `sentence-transformers` model. The default model is the larger `clip-ViT-L-14`; set `GALLERY_EMBEDDING_MODEL` to use a different local/Hugging Face model.
+- Model weights are downloaded once into `.gallery_models/` by default and then loaded from that local snapshot on later runs. Set `GALLERY_EMBEDDING_MODEL_CACHE=/path/to/cache` to choose another cache directory, or `GALLERY_PRELOAD_EMBEDDING_MODEL=0` to skip startup preload and load lazily on first upload/search.
 
 ```bash
 pip install -r requirements.txt

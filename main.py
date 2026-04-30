@@ -183,7 +183,11 @@ async def main() -> None:
     # Instantiate services - each one registers its own handlers on the broker.
     ImageService(broker)
     DocumentDBService(broker, collection=document_collection, vector_collection=vector_collection)
-    VectorDBService(broker, collection=vector_collection)
+    vector_service = VectorDBService(broker, collection=vector_collection)
+    if await vector_service.prepare_model():
+        print("Embedding model: ready")
+    else:
+        print("Embedding model: will load on first use")
     cli = CLIService(broker)
 
     # Run the broker listener and the interactive CLI concurrently.
