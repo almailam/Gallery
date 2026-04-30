@@ -34,8 +34,8 @@ async def test_json_collection_find_returns_async_snapshot(tmp_path):
         json.dumps(
             {
                 "records": {
-                    "img-1": {"_id": "img-1", "annotations": ["apple"]},
-                    "img-2": {"_id": "img-2", "annotations": ["banana"]},
+                    "img-1": {"_id": "img-1", "embedding": [1.0, 0.0]},
+                    "img-2": {"_id": "img-2", "embedding": [0.0, 1.0]},
                 }
             }
         ),
@@ -46,6 +46,6 @@ async def test_json_collection_find_returns_async_snapshot(tmp_path):
     records = [record async for record in collection.find({})]
 
     assert records == [
-        {"_id": "img-1", "annotations": ["apple"]},
-        {"_id": "img-2", "annotations": ["banana"]},
+        {"_id": "img-1", "embedding": [1.0, 0.0]},
+        {"_id": "img-2", "embedding": [0.0, 1.0]},
     ]

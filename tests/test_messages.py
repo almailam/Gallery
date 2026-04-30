@@ -86,13 +86,22 @@ def test_image_list_requested_type():
 def test_image_list_ready_fields():
     m = ImageListReady(
         request_id="r1",
-        images=[{"image_id": "i1", "path": "/a.jpg", "annotations": ["x"], "updated_at": "t"}],
+        images=[
+            {
+                "image_id": "i1",
+                "path": "/a.jpg",
+                "embedding_model": "test-model",
+                "embedding_dim": 2,
+                "updated_at": "t",
+            }
+        ],
     )
     assert m.type == "image.list_ready"
     data = json.loads(m.to_json())
     assert data["request_id"] == "r1"
     assert len(data["images"]) == 1
-    assert data["images"][0]["annotations"] == ["x"]
+    assert data["images"][0]["embedding_model"] == "test-model"
+    assert data["images"][0]["embedding_dim"] == 2
 
 
 def test_search_requested_fields():

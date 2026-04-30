@@ -96,16 +96,21 @@ class DocumentDBService:
             images: list[dict] = []
             for image_id, doc in snapshot:
                 vrec = vector_by_id.get(image_id, {}) if isinstance(vector_by_id, dict) else {}
-                annotations: list[str] = []
+                embedding_model = ""
+                embedding_dim = 0
                 if isinstance(vrec, dict):
-                    raw_ann = vrec.get("annotations", [])
-                    if isinstance(raw_ann, list):
-                        annotations = [str(x) for x in raw_ann if str(x).strip()]
+                    embedding_model = str(vrec.get("embedding_model") or "")
+                    raw_dim = vrec.get("embedding_dim", 0)
+                    if isinstance(raw_dim, int):
+                        embedding_dim = raw_dim
+                    elif isinstance(raw_dim, str) and raw_dim.isdigit():
+                        embedding_dim = int(raw_dim)
                 images.append(
                     {
                         "image_id": image_id,
                         "path": doc.get("path", ""),
-                        "annotations": annotations,
+                        "embedding_model": embedding_model,
+                        "embedding_dim": embedding_dim,
                         "updated_at": doc.get("updated_at", ""),
                     }
                 )

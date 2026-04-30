@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 import sys
@@ -21,8 +22,8 @@ log = logging.getLogger(__name__)
 
 COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("upload <path>", "queue an image for processing"),
-    ("search <query>", "search indexed images by terms"),
-    ("list", "show known images and annotations"),
+    ("search <query>", "search indexed images by visual similarity"),
+    ("list", "show known images and embedding status"),
 )
 EXIT_COMMANDS = ("quit", "exit", "q")
 COMMAND_NAMES = tuple(spec.split(maxsplit=1)[0] for spec, _ in COMMAND_SPECS)
@@ -33,6 +34,10 @@ COMMAND_BANNER = "\nCommands:  " + "  |  ".join((*[spec for spec, _ in COMMAND_S
 
 def _use_ansi_color() -> bool:
     return sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
+
+
+def _html(value: object) -> str:
+    return html.escape(str(value), quote=False)
 
 
 class _CLICompleter(Completer):
@@ -99,13 +104,11 @@ class CLIService:
                 "search.results_ready",
                 f"request_id={msg.get('request_id')} count={len(results)}",
             )
+            if not results:
+                self._print_hint("No results above the similarity threshold.")
+                return
             for row in results:
-                ann = row.get("annotations") or []
-                ann_s = ", ".join(ann) if ann else "(none)"
-                print(
-                    f"  score={row.get('score')} id={row.get('image_id')} path={row.get('path')}\n"
-                    f"      annotations: {ann_s}"
-                )
+                self._print_search_result(row)
 
         @self.broker.on(Channels.IMAGE_LIST_READY)
         async def on_image_list(msg: dict) -> None:
@@ -120,32 +123,91 @@ class CLIService:
             else:
                 self._print_event("image.list_ready", f"count={len(images)}")
             for row in images:
-                ann = row.get("annotations") or []
-                ann_s = ", ".join(ann) if ann else "(none)"
                 if _use_ansi_color():
                     print_formatted_text(
                         HTML(
                             f"  <style fg='ansibrightblack'>id=</style>"
-                            f"<ansimagenta>{row.get('image_id')}</ansimagenta> "
-                            f"<style fg='ansibrightblack'>path=</style>{row.get('path')}\n"
-                            f"      <style fg='ansibrightblack'>annotations:</style> "
-                            f"<ansigreen>{ann_s}</ansigreen>"
+                            f"<ansimagenta>{_html(row.get('image_id'))}</ansimagenta> "
+                            f"<style fg='ansibrightblack'>path=</style>{_html(row.get('path'))}\n"
+                            f"      <style fg='ansibrightblack'>embedding:</style> "
+                            f"<ansigreen>{_html(self._embedding_summary(row))}</ansigreen>"
                         )
                     )
                 else:
                     print(
                         f"  id={row.get('image_id')} path={row.get('path')}\n"
-                        f"      annotations: {ann_s}"
+                        f"      embedding: {self._embedding_summary(row)}"
                     )
+
+    @staticmethod
+    def _embedding_summary(row: dict) -> str:
+        dim = row.get("embedding_dim") or 0
+        model = row.get("embedding_model") or "unknown"
+        return f"{dim} dimensions ({model})" if dim else "not ready"
+
+    @staticmethod
+    def _format_score(value: object) -> str:
+        try:
+            return f"{float(value):.3f}"
+        except (TypeError, ValueError):
+            return "n/a"
+
+    @classmethod
+    def _print_search_result(cls, row: dict) -> None:
+        score = cls._format_score(row.get("score"))
+        if _use_ansi_color():
+            print_formatted_text(
+                HTML(
+                    "  <style fg='ansibrightblack'>similarity=</style>"
+                    f"<b><ansigreen>{_html(score)}</ansigreen></b> "
+                    "<style fg='ansibrightblack'>id=</style>"
+                    f"<ansimagenta>{_html(row.get('image_id'))}</ansimagenta> "
+                    f"<style fg='ansibrightblack'>path=</style>{_html(row.get('path'))}\n"
+                    "      <style fg='ansibrightblack'>embedding:</style> "
+                    f"<ansigreen>{_html(cls._embedding_summary(row))}</ansigreen>"
+                )
+            )
+            return
+        print(
+            f"  similarity={score} id={row.get('image_id')} path={row.get('path')}\n"
+            f"      embedding: {cls._embedding_summary(row)}"
+        )
 
     @staticmethod
     def _print_event(name: str, details: str = "") -> None:
         line = f"{name}: {details}".strip()
-        print(line)
+        if _use_ansi_color():
+            print_formatted_text(
+                HTML(
+                    f"<ansicyan>{_html(name)}</ansicyan>"
+                    f"{': ' if details else ''}"
+                    f"<style fg='ansibrightblack'>{_html(details)}</style>"
+                )
+            )
+        else:
+            print(line)
 
     @staticmethod
     def _print_error(message: str) -> None:
-        print(f"Error: {message}")
+        if _use_ansi_color():
+            print_formatted_text(HTML(f"<ansired>Error:</ansired> {_html(message)}"))
+        else:
+            print(f"Error: {message}")
+
+    @staticmethod
+    def _print_hint(message: str) -> None:
+        if _use_ansi_color():
+            print_formatted_text(HTML(f"<ansiyellow>Hint:</ansiyellow> {_html(message)}"))
+        else:
+            print(f"Hint: {message}")
+
+    @staticmethod
+    def _print_banner() -> None:
+        if _use_ansi_color():
+            commands = COMMAND_BANNER.removeprefix("\nCommands:  ")
+            print_formatted_text(HTML(f"\n<ansicyan>Commands:</ansicyan> {_html(commands)}"))
+        else:
+            print(COMMAND_BANNER)
 
     async def upload_image(self, path: str) -> None:
         try:
@@ -155,7 +217,7 @@ class CLIService:
             return
         if not resolved.is_file():
             self._print_error(f"file not found: {path}")
-            print("Hint: use an absolute path, or try e.g. samples/apple.jpeg")
+            self._print_hint("use an absolute path, or try e.g. samples/apple.jpeg")
             return
         msg = ImageUploadRequested(path=str(resolved))
         try:
@@ -191,7 +253,7 @@ class CLIService:
             completer=_CLICompleter(),
             complete_while_typing=False,
         )
-        print(COMMAND_BANNER)
+        self._print_banner()
 
         while True:
             # Keep prompt responsive even while background event handlers print logs.
@@ -212,4 +274,7 @@ class CLIService:
             elif cmd == "list":
                 await self.list_images()
             else:
-                print(COMMAND_USAGE)
+                if _use_ansi_color():
+                    print_formatted_text(HTML(f"<ansiyellow>{_html(COMMAND_USAGE)}</ansiyellow>"))
+                else:
+                    print(COMMAND_USAGE)

@@ -86,14 +86,16 @@ async def test_annotation_merges_with_prior_accept(broker):
 
 
 @pytest.mark.asyncio
-async def test_list_merges_vector_annotations(broker):
+async def test_list_merges_vector_embedding_metadata(broker):
     collection = _FakeCollection()
     vector_collection = _FakeCollection(
         {
             "img-1": {
                 "_id": "img-1",
                 "image_id": "img-1",
-                "annotations": ["apple", "fruit"],
+                "embedding": [1.0, 0.0],
+                "embedding_model": "test-model",
+                "embedding_dim": 2,
                 "path": "/a.jpg",
             }
         }
@@ -128,6 +130,7 @@ async def test_list_merges_vector_annotations(broker):
     assert len(body["images"]) == 1
     assert body["images"][0]["image_id"] == "img-1"
     assert body["images"][0]["path"] == "/photos/a.jpg"
-    assert body["images"][0]["annotations"] == ["apple", "fruit"]
+    assert body["images"][0]["embedding_model"] == "test-model"
+    assert body["images"][0]["embedding_dim"] == 2
 
     broker._client.publish.assert_awaited()

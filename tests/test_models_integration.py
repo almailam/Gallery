@@ -9,17 +9,18 @@ from gallery.services.vector_db import VectorDBService
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_github_models_annotates_real_image():
-    """Calls GitHub Models with a real sample image and checks annotations."""
-    if not os.environ.get("MODELS_TOKEN"):
-        pytest.skip("MODELS_TOKEN is not set")
+async def test_local_model_embeds_real_image():
+    """Calls the local embedding model with a real sample image."""
+    if not os.environ.get("GALLERY_RUN_EMBEDDING_INTEGRATION"):
+        pytest.skip("Set GALLERY_RUN_EMBEDDING_INTEGRATION=1 to run local embedding integration")
+    pytest.importorskip("PIL")
+    pytest.importorskip("sentence_transformers")
 
     sample_image = Path("samples/tomato.png").resolve()
     assert sample_image.is_file(), "Missing integration sample image: samples/tomato.png"
 
     service = VectorDBService(RedisBroker())
-    annotations = await service._annotate_image(str(sample_image))
+    embedding = await service._embed_image(str(sample_image))
 
-    assert annotations, "Expected at least one annotation from GitHub Models"
-    assert len(annotations) <= 5
-    assert all(isinstance(tag, str) and tag.strip() for tag in annotations)
+    assert embedding, "Expected an embedding from the local model"
+    assert all(isinstance(value, float) for value in embedding)
