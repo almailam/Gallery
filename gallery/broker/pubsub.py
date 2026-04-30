@@ -37,7 +37,6 @@ _BOLD = "\033[1m"
 _TYPE_COLOR: dict[str, str] = {
     "image.upload_requested": "\033[38;5;214m",  # orange
     "image.accepted": "\033[32m",  # green
-    "image.annotation_requested": "\033[38;5;39m",  # teal
     "image.embedding_requested": "\033[38;5;99m",  # purple
     "image.stored": "\033[38;5;118m",  # yellow-green
     "image.pipeline_complete": "\033[38;5;51m",  # cyan
@@ -45,6 +44,8 @@ _TYPE_COLOR: dict[str, str] = {
     "image.list_ready": "\033[38;5;81m",
     "search.requested": "\033[38;5;208m",  # dark orange
     "search.results_ready": "\033[35m",  # magenta
+    "storage.clear_requested": "\033[38;5;196m",  # bright red
+    "storage.clear_completed": "\033[38;5;202m",  # red-orange
 }
 _DEFAULT_TYPE_COLOR = "\033[36m"
 
@@ -93,7 +94,6 @@ def _format_incoming_redis_log_line(channel: str, data: dict, *, use_color: bool
 class Channels:
     IMAGE_UPLOAD_REQUESTED = "gallery:image:upload_requested"
     IMAGE_ACCEPTED = "gallery:image:accepted"
-    IMAGE_ANNOTATION_REQUESTED = "gallery:image:annotation_requested"
     IMAGE_EMBEDDING_REQUESTED = "gallery:image:embedding_requested"
     IMAGE_STORED = "gallery:image:stored"
     IMAGE_PIPELINE_COMPLETE = "gallery:image:pipeline_complete"
@@ -101,6 +101,8 @@ class Channels:
     IMAGE_LIST_READY = "gallery:image:list_ready"
     SEARCH_REQUESTED = "gallery:search:requested"
     SEARCH_RESULTS_READY = "gallery:search:results_ready"
+    STORAGE_CLEAR_REQUESTED = "gallery:storage:clear_requested"
+    STORAGE_CLEAR_COMPLETED = "gallery:storage:clear_completed"
 
 
 class RedisBroker:

@@ -37,6 +37,10 @@ class _FakeCollection:
     def find(self, filter_doc):
         return _FakeAsyncCursor(self.records.values())
 
+    async def delete_many(self, filter_doc):
+        del filter_doc
+        self.records = {}
+
 
 @pytest.fixture
 def broker():
@@ -62,27 +66,6 @@ async def test_document_db_persists_accepted(broker):
     assert "img-1" in collection.records
     assert collection.records["img-1"]["path"] == "/photos/a.jpg"
     assert "updated_at" in collection.records["img-1"]
-
-
-@pytest.mark.asyncio
-async def test_annotation_merges_with_prior_accept(broker):
-    collection = _FakeCollection()
-    DocumentDBService(broker, collection=collection, vector_collection=_FakeCollection())
-    on_ann = broker._handlers[Channels.IMAGE_ANNOTATION_REQUESTED][0]
-    on_acc = broker._handlers[Channels.IMAGE_ACCEPTED][0]
-
-    await on_ann({"image_id": "img-2", "path": "/b.jpg", "type": "image.annotation_requested"})
-    await on_acc(
-        {
-            "type": "image.accepted",
-            "image_id": "img-2",
-            "path": "/b.jpg",
-        }
-    )
-
-    rec = collection.records["img-2"]
-    assert rec["path"] == "/b.jpg"
-    assert "annotation_requested_at" in rec
 
 
 @pytest.mark.asyncio
@@ -134,3 +117,28 @@ async def test_list_merges_vector_embedding_metadata(broker):
     assert body["images"][0]["embedding_dim"] == 2
 
     broker._client.publish.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_document_db_clears_records_and_publishes_completion(broker):
+    collection = _FakeCollection({"img-1": {"_id": "img-1"}, "img-2": {"_id": "img-2"}})
+    DocumentDBService(broker, collection=collection, vector_collection=_FakeCollection())
+
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        import json
+
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    handler = broker._handlers[Channels.STORAGE_CLEAR_REQUESTED][0]
+    await handler({"type": "storage.clear_requested", "id": "req-clear-1"})
+
+    assert collection.records == {}
+    assert len(published) == 1
+    channel, body = published[0]
+    assert channel == Channels.STORAGE_CLEAR_COMPLETED
+    assert body["service"] == "documents"
+    assert body["deleted_count"] == 2
+    assert body["request_id"] == "req-clear-1"

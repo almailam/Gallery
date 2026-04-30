@@ -20,12 +20,11 @@ _EVENT_NAMES = ("upload", "search", "list")
 _DEFAULT_UPLOAD_PATHS = (
     "samples/bananas.jpg",
     "samples/apple.jpeg",
-    "samples/cheese_burger.jpg",
+    "samples/tomato.png",
 )
 _OBSERVED_CHANNELS = (
     Channels.IMAGE_UPLOAD_REQUESTED,
     Channels.IMAGE_ACCEPTED,
-    Channels.IMAGE_ANNOTATION_REQUESTED,
     Channels.IMAGE_EMBEDDING_REQUESTED,
     Channels.IMAGE_STORED,
     Channels.IMAGE_PIPELINE_COMPLETE,

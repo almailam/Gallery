@@ -46,6 +46,10 @@ class _FakeCollection:
     def find(self, filter_doc):
         return _FakeAsyncCursor(self.records.values())
 
+    async def delete_many(self, filter_doc):
+        del filter_doc
+        self.records = {}
+
 
 @pytest.fixture
 def broker():
@@ -205,7 +209,6 @@ async def test_search_backfills_legacy_record_embedding(broker):
                 "_id": "img-1",
                 "image_id": "img-1",
                 "path": "/photos/apple.jpg",
-                "annotations": ["apple"],
             }
         }
     )
@@ -269,3 +272,31 @@ def test_cosine_similarity_handles_vectors():
     assert _cosine_similarity([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
     assert _cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
     assert _cosine_similarity([1.0], [1.0, 0.0]) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_vector_db_clears_records_and_publishes_completion(broker):
+    collection = _FakeCollection(
+        {
+            "img-1": {"_id": "img-1", "embedding": [1.0, 0.0]},
+            "img-2": {"_id": "img-2", "embedding": [0.0, 1.0]},
+        }
+    )
+    VectorDBService(broker, collection=collection, embedding_model_name="test-model")
+
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    handler = broker._handlers[Channels.STORAGE_CLEAR_REQUESTED][0]
+    await handler({"type": "storage.clear_requested", "id": "req-clear-2"})
+
+    assert collection.records == {}
+    assert len(published) == 1
+    channel, body = published[0]
+    assert channel == Channels.STORAGE_CLEAR_COMPLETED
+    assert body["service"] == "vectors"
+    assert body["deleted_count"] == 2
+    assert body["request_id"] == "req-clear-2"

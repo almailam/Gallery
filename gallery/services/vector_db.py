@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import SearchResultsReady
+from gallery.messages import SearchResultsReady, StorageClearCompleted
 
 log = logging.getLogger(__name__)
 
@@ -301,5 +301,25 @@ class VectorDBService:
                 SearchResultsReady(
                     request_id=msg.get("id", ""),
                     results=results,
+                ),
+            )
+
+        @self.broker.on(Channels.STORAGE_CLEAR_REQUESTED)
+        async def on_clear_requested(msg: dict) -> None:
+            if self._collection is None:
+                log.warning("[VectorDB] no Mongo collection configured")
+                return
+            request_id = msg.get("id", "")
+            deleted = 0
+            async for _ in self._collection.find({}):
+                deleted += 1
+            await self._collection.delete_many({})
+            log.info("[VectorDB] cleared embeddings count=%s", deleted)
+            await self.broker.publish(
+                Channels.STORAGE_CLEAR_COMPLETED,
+                StorageClearCompleted(
+                    request_id=request_id,
+                    service="vectors",
+                    deleted_count=deleted,
                 ),
             )

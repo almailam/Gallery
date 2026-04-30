@@ -33,6 +33,13 @@ def test_cli_completer_matches_list_prefix():
     assert "list" in texts
 
 
+def test_cli_completer_matches_clear_prefix():
+    c = _CLICompleter()
+    doc = Document("cl", cursor_position=2)
+    texts = [comp.text for comp in c.get_completions(doc, MagicMock())]
+    assert "clear" in texts
+
+
 def test_cli_completer_uses_shared_command_list():
     assert _CLICompleter._commands == COMPLETION_COMMANDS
     assert all(command in COMPLETION_COMMANDS for command in EXIT_COMMANDS)

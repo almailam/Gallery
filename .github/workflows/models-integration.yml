@@ -1,4 +1,4 @@
-name: Models Integration Tests
+name: Embedding Integration Tests
 
 on:
   workflow_dispatch:
@@ -6,14 +6,12 @@ on:
     - cron: "0 6 * * *"
 
 concurrency:
-  group: models-integration-${{ github.ref }}
+  group: embedding-integration-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test-models:
+  test-embeddings:
     runs-on: ubuntu-latest
-    env:
-      MODELS_TOKEN: ${{ secrets.MODELS_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -29,5 +27,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run GitHub Models integration tests
+      - name: Run local embedding integration tests
+        env:
+          GALLERY_RUN_EMBEDDING_INTEGRATION: "1"
         run: pytest --tb=short -m integration

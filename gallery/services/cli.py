@@ -16,7 +16,12 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import ImageListRequested, ImageUploadRequested, SearchRequested
+from gallery.messages import (
+    ImageListRequested,
+    ImageUploadRequested,
+    SearchRequested,
+    StorageClearRequested,
+)
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +29,7 @@ COMMAND_SPECS: tuple[tuple[str, str], ...] = (
     ("upload <path>", "queue an image for processing"),
     ("search <query>", "search indexed images by visual similarity"),
     ("list", "show known images and embedding status"),
+    ("clear", "delete all stored images and embeddings"),
 )
 EXIT_COMMANDS = ("quit", "exit", "q")
 COMMAND_NAMES = tuple(spec.split(maxsplit=1)[0] for spec, _ in COMMAND_SPECS)
@@ -109,6 +115,15 @@ class CLIService:
                 return
             for row in results:
                 self._print_search_result(row)
+
+        @self.broker.on(Channels.STORAGE_CLEAR_COMPLETED)
+        async def on_clear_completed(msg: dict) -> None:
+            service = str(msg.get("service") or "?")
+            count = int(msg.get("deleted_count") or 0)
+            self._print_event(
+                "storage.clear_completed",
+                f"service={service} deleted_count={count}",
+            )
 
         @self.broker.on(Channels.IMAGE_LIST_READY)
         async def on_image_list(msg: dict) -> None:
@@ -248,6 +263,16 @@ class CLIService:
             return
         log.info("Requested image list")
 
+    async def clear_storage(self) -> None:
+        msg = StorageClearRequested()
+        try:
+            await self.broker.publish(Channels.STORAGE_CLEAR_REQUESTED, msg)
+        except Exception as e:
+            self._print_error(f"could not send clear request to Redis: {e}")
+            log.exception("Clear publish failed")
+            return
+        log.info("Requested storage clear")
+
     async def run_interactive(self) -> None:
         session = PromptSession(
             completer=_CLICompleter(),
@@ -273,8 +298,29 @@ class CLIService:
                 await self.search(arg)
             elif cmd == "list":
                 await self.list_images()
+            elif cmd == "clear":
+                if await self._confirm_clear(session, arg):
+                    await self.clear_storage()
+                else:
+                    self._print_hint("clear cancelled")
             else:
                 if _use_ansi_color():
                     print_formatted_text(HTML(f"<ansiyellow>{_html(COMMAND_USAGE)}</ansiyellow>"))
                 else:
                     print(COMMAND_USAGE)
+
+    @staticmethod
+    async def _confirm_clear(session: PromptSession, arg: str) -> bool:
+        if arg.strip().lower() in {"y", "yes", "--yes", "-y"}:
+            return True
+        prompt_text: object
+        if _use_ansi_color():
+            prompt_text = HTML(
+                "<ansired>This will delete all stored images and embeddings.</ansired> "
+                "Type <b>yes</b> to confirm: "
+            )
+        else:
+            prompt_text = "This will delete all stored images and embeddings. Type 'yes' to confirm: "
+        with patch_stdout():
+            answer = await session.prompt_async(prompt_text)
+        return answer.strip().lower() in {"y", "yes"}

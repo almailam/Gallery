@@ -44,6 +44,7 @@ When the prompt opens, the available commands are:
 - `upload <path>`: queue an image for processing
 - `search <query>`: search indexed images by vector similarity
 - `list`: show known images and embedding status
+- `clear`: delete all stored images and embeddings (asks for `yes` confirmation; pass `clear yes` to skip the prompt)
 - `quit` / `exit` / `q`: leave the CLI
 
 Example:

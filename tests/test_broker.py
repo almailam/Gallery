@@ -69,7 +69,6 @@ def test_ansi_for_message_type_known_types_distinct():
     types = (
         "image.upload_requested",
         "image.accepted",
-        "image.annotation_requested",
         "image.embedding_requested",
         "image.stored",
         "image.pipeline_complete",
@@ -97,12 +96,13 @@ def test_ansi_for_unknown_message_type_uses_default():
 def test_channels_constants():
     assert Channels.IMAGE_UPLOAD_REQUESTED == "gallery:image:upload_requested"
     assert Channels.IMAGE_ACCEPTED == "gallery:image:accepted"
-    assert Channels.IMAGE_ANNOTATION_REQUESTED == "gallery:image:annotation_requested"
     assert Channels.IMAGE_EMBEDDING_REQUESTED == "gallery:image:embedding_requested"
     assert Channels.IMAGE_STORED == "gallery:image:stored"
     assert Channels.IMAGE_PIPELINE_COMPLETE == "gallery:image:pipeline_complete"
     assert Channels.SEARCH_REQUESTED == "gallery:search:requested"
     assert Channels.SEARCH_RESULTS_READY == "gallery:search:results_ready"
+    assert Channels.STORAGE_CLEAR_REQUESTED == "gallery:storage:clear_requested"
+    assert Channels.STORAGE_CLEAR_COMPLETED == "gallery:storage:clear_completed"
 
 
 def test_handler_registration(broker):

@@ -32,13 +32,6 @@ class ImageAccepted(Message):
 
 
 @dataclass
-class ImageAnnotationRequested(Message):
-    type: str = "image.annotation_requested"
-    image_id: str = ""
-    path: str = ""
-
-
-@dataclass
 class ImageEmbeddingRequested(Message):
     type: str = "image.embedding_requested"
     image_id: str = ""
@@ -84,3 +77,16 @@ class SearchResultsReady(Message):
     type: str = "search.results_ready"
     request_id: str = ""
     results: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class StorageClearRequested(Message):
+    type: str = "storage.clear_requested"
+
+
+@dataclass
+class StorageClearCompleted(Message):
+    type: str = "storage.clear_completed"
+    request_id: str = ""
+    service: str = ""
+    deleted_count: int = 0

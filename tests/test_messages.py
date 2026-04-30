@@ -3,7 +3,6 @@ from datetime import datetime
 
 from gallery.messages import (
     ImageAccepted,
-    ImageAnnotationRequested,
     ImageEmbeddingRequested,
     ImageListReady,
     ImageListRequested,
@@ -13,6 +12,8 @@ from gallery.messages import (
     Message,
     SearchRequested,
     SearchResultsReady,
+    StorageClearCompleted,
+    StorageClearRequested,
 )
 
 
@@ -62,13 +63,6 @@ def test_image_pipeline_complete_fields():
     data = json.loads(m.to_json())
     assert data["image_id"] == "abc"
     assert data["path"] == "/tmp/x.jpg"
-
-
-def test_image_annotation_requested_fields():
-    m = ImageAnnotationRequested(image_id="abc", path="/img.jpg")
-    assert m.type == "image.annotation_requested"
-    data = json.loads(m.to_json())
-    assert data["image_id"] == "abc"
 
 
 def test_image_embedding_requested_fields():
@@ -136,3 +130,18 @@ def test_search_results_ready_serializes_results():
     m = SearchResultsReady(request_id="r2", results=[{"id": "1", "score": 0.9}])
     data = json.loads(m.to_json())
     assert data["results"] == [{"id": "1", "score": 0.9}]
+
+
+def test_storage_clear_requested_type():
+    m = StorageClearRequested()
+    assert m.type == "storage.clear_requested"
+    assert json.loads(m.to_json())["type"] == "storage.clear_requested"
+
+
+def test_storage_clear_completed_fields():
+    m = StorageClearCompleted(request_id="r1", service="documents", deleted_count=3)
+    data = json.loads(m.to_json())
+    assert m.type == "storage.clear_completed"
+    assert data["request_id"] == "r1"
+    assert data["service"] == "documents"
+    assert data["deleted_count"] == 3

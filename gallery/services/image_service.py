@@ -8,7 +8,6 @@ import uuid
 from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.messages import (
     ImageAccepted,
-    ImageAnnotationRequested,
     ImageEmbeddingRequested,
 )
 
@@ -33,13 +32,6 @@ class ImageService:
         await self.broker.publish(
             Channels.IMAGE_ACCEPTED,
             ImageAccepted(
-                image_id=image_id,
-                path=path,
-            ),
-        )
-        await self.broker.publish(
-            Channels.IMAGE_ANNOTATION_REQUESTED,
-            ImageAnnotationRequested(
                 image_id=image_id,
                 path=path,
             ),

@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import ImageListReady, ImagePipelineComplete, ImageStored
+from gallery.messages import (
+    ImageListReady,
+    ImagePipelineComplete,
+    ImageStored,
+    StorageClearCompleted,
+)
 
 log = logging.getLogger(__name__)
 
@@ -62,29 +67,6 @@ class DocumentDBService:
                 ImagePipelineComplete(image_id=image_id, path=msg.get("path", "")),
             )
 
-        @self.broker.on(Channels.IMAGE_ANNOTATION_REQUESTED)
-        async def on_annotation_requested(msg: dict) -> None:
-            image_id = msg.get("image_id")
-            if not image_id:
-                return
-            now = _utc_now_iso()
-            doc = {
-                **{k: v for k, v in msg.items() if v is not None},
-                "image_id": image_id,
-                "annotation_requested_at": now,
-                "updated_at": now,
-            }
-            await self._collection.update_one(
-                {"_id": image_id},
-                {"$set": doc, "$setOnInsert": {"_id": image_id}},
-                upsert=True,
-            )
-            log.info(
-                "[DocumentDB] annotation requested image_id=%s path=%s",
-                image_id,
-                msg.get("path"),
-            )
-
         @self.broker.on(Channels.IMAGE_LIST_REQUESTED)
         async def on_list_requested(msg: dict) -> None:
             vector_by_id = await self._read_vector_records()
@@ -120,3 +102,20 @@ class DocumentDBService:
                 ImageListReady(request_id=msg.get("id", ""), images=images),
             )
             log.info("[DocumentDB] list ready count=%s", len(images))
+
+        @self.broker.on(Channels.STORAGE_CLEAR_REQUESTED)
+        async def on_clear_requested(msg: dict) -> None:
+            request_id = msg.get("id", "")
+            deleted = 0
+            async for _ in self._collection.find({}):
+                deleted += 1
+            await self._collection.delete_many({})
+            log.info("[DocumentDB] cleared documents count=%s", deleted)
+            await self.broker.publish(
+                Channels.STORAGE_CLEAR_COMPLETED,
+                StorageClearCompleted(
+                    request_id=request_id,
+                    service="documents",
+                    deleted_count=deleted,
+                ),
+            )

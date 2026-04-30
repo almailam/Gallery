@@ -28,6 +28,22 @@ async def test_json_collection_upserts_and_persists_records(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_json_collection_delete_many_clears_records(tmp_path):
+    path = tmp_path / "vectors.json"
+    collection = JsonCollection(path)
+    await collection.update_one(
+        {"_id": "img-1"},
+        {"$setOnInsert": {"_id": "img-1"}, "$set": {"image_id": "img-1"}},
+        upsert=True,
+    )
+
+    await collection.delete_many({})
+
+    assert [record async for record in collection.find({})] == []
+    assert json.loads(path.read_text(encoding="utf-8"))["records"] == {}
+
+
+@pytest.mark.asyncio
 async def test_json_collection_find_returns_async_snapshot(tmp_path):
     path = tmp_path / "vectors.json"
     path.write_text(

@@ -86,3 +86,9 @@ class JsonCollection:
     def find(self, filter_doc: dict[str, Any]) -> _JsonAsyncCursor:
         del filter_doc
         return _JsonAsyncCursor([dict(record) for record in self._records.values()])
+
+    async def delete_many(self, filter_doc: dict[str, Any]) -> None:
+        del filter_doc
+        async with self._lock:
+            self._records = {}
+            self._write_records()
