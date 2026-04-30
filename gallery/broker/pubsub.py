@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import sys
 from typing import Awaitable, Callable
 
 import redis.asyncio as aioredis
 
 from gallery.messages import Message
+from gallery.utils import _use_ansi_color
 
 log = logging.getLogger(__name__)
 
@@ -23,10 +22,6 @@ def _as_str(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value)
-
-
-def _use_ansi_color() -> bool:
-    return sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
 
 
 _RESET = "\033[0m"

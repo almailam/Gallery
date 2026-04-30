@@ -4,42 +4,7 @@ import pytest
 
 from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.services.document_db import DocumentDBService
-
-
-class _FakeAsyncCursor:
-    def __init__(self, records):
-        self._records = list(records)
-        self._index = 0
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if self._index >= len(self._records):
-            raise StopAsyncIteration
-        value = self._records[self._index]
-        self._index += 1
-        return dict(value)
-
-
-class _FakeCollection:
-    def __init__(self, records=None):
-        self.records = records or {}
-
-    async def update_one(self, filter_doc, update_doc, *, upsert=False):
-        key = filter_doc["_id"]
-        if key not in self.records:
-            if not upsert:
-                return
-            self.records[key] = dict(update_doc.get("$setOnInsert", {}))
-        self.records[key].update(update_doc.get("$set", {}))
-
-    def find(self, filter_doc):
-        return _FakeAsyncCursor(self.records.values())
-
-    async def delete_many(self, filter_doc):
-        del filter_doc
-        self.records = {}
+from tests.helpers import FakeCollection
 
 
 @pytest.fixture
@@ -51,8 +16,8 @@ def broker():
 
 @pytest.mark.asyncio
 async def test_document_db_persists_accepted(broker):
-    collection = _FakeCollection()
-    DocumentDBService(broker, collection=collection, vector_collection=_FakeCollection())
+    collection = FakeCollection()
+    DocumentDBService(broker, collection=collection, vector_collection=FakeCollection())
     handler = broker._handlers[Channels.IMAGE_ACCEPTED][0]
     await handler(
         {
@@ -69,9 +34,31 @@ async def test_document_db_persists_accepted(broker):
 
 
 @pytest.mark.asyncio
+async def test_document_db_accepted_publishes_only_stored(broker):
+    """DocumentDBService must publish IMAGE_STORED (not IMAGE_PIPELINE_COMPLETE)."""
+    collection = FakeCollection()
+    DocumentDBService(broker, collection=collection, vector_collection=FakeCollection())
+
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        import json
+
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    handler = broker._handlers[Channels.IMAGE_ACCEPTED][0]
+    await handler({"type": "image.accepted", "image_id": "img-1", "path": "/photos/a.jpg"})
+
+    channels = [ch for ch, _ in published]
+    assert Channels.IMAGE_STORED in channels
+    assert Channels.IMAGE_PIPELINE_COMPLETE not in channels
+
+
+@pytest.mark.asyncio
 async def test_list_merges_vector_embedding_metadata(broker):
-    collection = _FakeCollection()
-    vector_collection = _FakeCollection(
+    collection = FakeCollection()
+    vector_collection = FakeCollection(
         {
             "img-1": {
                 "_id": "img-1",
@@ -121,8 +108,8 @@ async def test_list_merges_vector_embedding_metadata(broker):
 
 @pytest.mark.asyncio
 async def test_document_db_clears_records_and_publishes_completion(broker):
-    collection = _FakeCollection({"img-1": {"_id": "img-1"}, "img-2": {"_id": "img-2"}})
-    DocumentDBService(broker, collection=collection, vector_collection=_FakeCollection())
+    collection = FakeCollection({"img-1": {"_id": "img-1"}, "img-2": {"_id": "img-2"}})
+    DocumentDBService(broker, collection=collection, vector_collection=FakeCollection())
 
     published: list[tuple[str, dict]] = []
 
@@ -142,3 +129,34 @@ async def test_document_db_clears_records_and_publishes_completion(broker):
     assert body["service"] == "documents"
     assert body["deleted_count"] == 2
     assert body["request_id"] == "req-clear-1"
+
+
+@pytest.mark.asyncio
+async def test_document_db_accepted_missing_image_id_is_skipped(broker):
+    collection = FakeCollection()
+    DocumentDBService(broker, collection=collection, vector_collection=FakeCollection())
+    handler = broker._handlers[Channels.IMAGE_ACCEPTED][0]
+    await handler({"type": "image.accepted", "path": "/photos/a.jpg"})
+
+    assert collection.records == {}
+
+
+@pytest.mark.asyncio
+async def test_document_db_list_empty_collection(broker):
+    collection = FakeCollection()
+    DocumentDBService(broker, collection=collection, vector_collection=FakeCollection())
+
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        import json
+
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    on_list = broker._handlers[Channels.IMAGE_LIST_REQUESTED][0]
+    await on_list({"type": "image.list_requested", "id": "req-empty"})
+
+    assert len(published) == 1
+    _, body = published[0]
+    assert body["images"] == []

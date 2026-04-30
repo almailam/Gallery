@@ -6,12 +6,12 @@ import asyncio
 import logging
 import math
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import ImageEmbeddingFailed, SearchResultsReady, StorageClearCompleted
+from gallery.messages import ImageEmbeddingFailed, ImagePipelineComplete, SearchResultsReady, StorageClearCompleted
+from gallery.utils import _utc_now_iso
 
 log = logging.getLogger(__name__)
 
@@ -20,10 +20,6 @@ _DEFAULT_EMBEDDING_MODEL = "clip-ViT-L-14"
 _DEFAULT_MODEL_CACHE_DIR = _PROJECT_ROOT / ".gallery_models"
 _DEFAULT_SEARCH_MIN_SCORE = 0.0
 _FILENAME_MATCH_BONUS = 0.35
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _embedding_model_name() -> str:
@@ -391,6 +387,10 @@ class VectorDBService:
                 image_id,
                 len(embedding),
                 self._embedding_model_name,
+            )
+            await self.broker.publish(
+                Channels.IMAGE_PIPELINE_COMPLETE,
+                ImagePipelineComplete(image_id=image_id, path=path),
             )
 
         @self.broker.on(Channels.SEARCH_REQUESTED)

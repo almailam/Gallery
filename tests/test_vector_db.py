@@ -15,46 +15,7 @@ from gallery.services.vector_db import (
     _query_variants,
     _safe_model_dir_name,
 )
-
-
-class _FakeAsyncCursor:
-    def __init__(self, records):
-        self._records = list(records)
-        self._index = 0
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if self._index >= len(self._records):
-            raise StopAsyncIteration
-        value = self._records[self._index]
-        self._index += 1
-        return dict(value)
-
-
-class _FakeCollection:
-    def __init__(self, records=None):
-        self.records = records or {}
-
-    async def find_one(self, filter_doc):
-        record = self.records.get(filter_doc["_id"])
-        return dict(record) if record else None
-
-    async def update_one(self, filter_doc, update_doc, *, upsert=False):
-        key = filter_doc["_id"]
-        if key not in self.records:
-            if not upsert:
-                return
-            self.records[key] = dict(update_doc.get("$setOnInsert", {}))
-        self.records[key].update(update_doc.get("$set", {}))
-
-    def find(self, filter_doc):
-        return _FakeAsyncCursor(self.records.values())
-
-    async def delete_many(self, filter_doc):
-        del filter_doc
-        self.records = {}
+from tests.helpers import FakeCollection
 
 
 @pytest.fixture
@@ -66,7 +27,7 @@ def broker():
 
 @pytest.mark.asyncio
 async def test_embedding_reuses_stored_embedding_without_model_call(broker):
-    collection = _FakeCollection(
+    collection = FakeCollection(
         {
             "img-1": {
                 "_id": "img-1",
@@ -93,7 +54,7 @@ async def test_embedding_reuses_stored_embedding_without_model_call(broker):
 
 @pytest.mark.asyncio
 async def test_embedding_calls_model_once_then_reuses_for_same_image_id(broker):
-    collection = _FakeCollection()
+    collection = FakeCollection()
     svc = VectorDBService(broker, collection=collection, embedding_model_name="test-model")
     handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
 
@@ -109,7 +70,7 @@ async def test_embedding_calls_model_once_then_reuses_for_same_image_id(broker):
 
 @pytest.mark.asyncio
 async def test_embedding_failure_publishes_visible_event(broker):
-    collection = _FakeCollection()
+    collection = FakeCollection()
     svc = VectorDBService(broker, collection=collection, embedding_model_name="test-model")
     handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
     published: list[tuple[str, dict]] = []
@@ -134,7 +95,7 @@ async def test_embedding_failure_publishes_visible_event(broker):
 
 @pytest.mark.asyncio
 async def test_embedding_reuses_embedding_for_same_file_path_different_id(tmp_path, broker):
-    collection = _FakeCollection()
+    collection = FakeCollection()
     image_file = tmp_path / "same.jpg"
     image_file.write_bytes(b"\xff\xd8\xff")
 
@@ -156,7 +117,7 @@ async def test_embedding_reuses_embedding_for_same_file_path_different_id(tmp_pa
 
 @pytest.mark.asyncio
 async def test_search_returns_similarity_ranked_records(broker):
-    collection = _FakeCollection(
+    collection = FakeCollection(
         {
             "img-1": {
                 "_id": "img-1",
@@ -204,7 +165,7 @@ async def test_search_returns_similarity_ranked_records(broker):
 
 @pytest.mark.asyncio
 async def test_search_filters_results_below_similarity_threshold(broker):
-    collection = _FakeCollection(
+    collection = FakeCollection(
         {
             "img-1": {
                 "_id": "img-1",
@@ -234,7 +195,7 @@ async def test_search_filters_results_below_similarity_threshold(broker):
 
 @pytest.mark.asyncio
 async def test_search_backfills_legacy_record_embedding(broker):
-    collection = _FakeCollection(
+    collection = FakeCollection(
         {
             "img-1": {
                 "_id": "img-1",
@@ -266,7 +227,7 @@ async def test_search_backfills_legacy_record_embedding(broker):
 
 @pytest.mark.asyncio
 async def test_search_skips_unusable_records_for_other_embedding_models(broker):
-    collection = _FakeCollection(
+    collection = FakeCollection(
         {
             "img-1": {
                 "_id": "img-1",
@@ -336,7 +297,7 @@ def test_model_repo_and_local_dir_names():
 
 def test_local_model_path_uses_configured_cache(broker, tmp_path, monkeypatch):
     monkeypatch.setenv("GALLERY_EMBEDDING_MODEL_CACHE", str(tmp_path / "models"))
-    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="clip-ViT-L-14")
+    svc = VectorDBService(broker, collection=FakeCollection(), embedding_model_name="clip-ViT-L-14")
 
     assert svc._local_model_path() == tmp_path / "models" / "sentence-transformers__clip-ViT-L-14"
 
@@ -352,7 +313,7 @@ def test_local_model_path_reuses_huggingface_snapshot_cache(broker, tmp_path, mo
     )
     snapshot.mkdir(parents=True)
     (snapshot / "modules.json").write_text("{}", encoding="utf-8")
-    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="clip-ViT-L-14")
+    svc = VectorDBService(broker, collection=FakeCollection(), embedding_model_name="clip-ViT-L-14")
 
     assert svc._local_model_path() == snapshot
 
@@ -362,7 +323,7 @@ def test_ensure_local_model_reuses_downloaded_snapshot(broker, tmp_path, monkeyp
     local_model = tmp_path / "models" / "sentence-transformers__clip-ViT-L-14"
     local_model.mkdir(parents=True)
     (local_model / "modules.json").write_text("{}", encoding="utf-8")
-    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="clip-ViT-L-14")
+    svc = VectorDBService(broker, collection=FakeCollection(), embedding_model_name="clip-ViT-L-14")
 
     with patch("huggingface_hub.snapshot_download") as mock_snapshot:
         assert svc._ensure_local_model() == local_model
@@ -376,7 +337,7 @@ async def test_prepare_model_loads_model_once_when_enabled(broker, tmp_path, mon
     model = object()
     svc = VectorDBService(
         broker,
-        collection=_FakeCollection(),
+        collection=FakeCollection(),
         embedding_model=model,
         embedding_model_name="test-model",
     )
@@ -388,14 +349,14 @@ async def test_prepare_model_loads_model_once_when_enabled(broker, tmp_path, mon
 @pytest.mark.asyncio
 async def test_prepare_model_can_be_disabled(broker, monkeypatch):
     monkeypatch.setenv("GALLERY_PRELOAD_EMBEDDING_MODEL", "0")
-    svc = VectorDBService(broker, collection=_FakeCollection(), embedding_model_name="test-model")
+    svc = VectorDBService(broker, collection=FakeCollection(), embedding_model_name="test-model")
 
     assert await svc.prepare_model() is False
 
 
 @pytest.mark.asyncio
 async def test_vector_db_clears_records_and_publishes_completion(broker):
-    collection = _FakeCollection(
+    collection = FakeCollection(
         {
             "img-1": {"_id": "img-1", "embedding": [1.0, 0.0]},
             "img-2": {"_id": "img-2", "embedding": [0.0, 1.0]},
@@ -419,3 +380,81 @@ async def test_vector_db_clears_records_and_publishes_completion(broker):
     assert body["service"] == "vectors"
     assert body["deleted_count"] == 2
     assert body["request_id"] == "req-clear-2"
+
+
+@pytest.mark.asyncio
+async def test_embedding_success_publishes_pipeline_complete(broker):
+    collection = FakeCollection()
+    svc = VectorDBService(broker, collection=collection, embedding_model_name="test-model")
+    handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    with patch.object(svc, "_embed_image", new_callable=AsyncMock) as mock_embed:
+        mock_embed.return_value = [0.6, 0.8]
+        await handler({"image_id": "img-1", "path": "/x.jpg", "type": "image.embedding_requested"})
+
+    channels = [ch for ch, _ in published]
+    assert Channels.IMAGE_PIPELINE_COMPLETE in channels
+    pipeline_body = next(body for ch, body in published if ch == Channels.IMAGE_PIPELINE_COMPLETE)
+    assert pipeline_body["image_id"] == "img-1"
+    assert pipeline_body["path"] == "/x.jpg"
+
+
+@pytest.mark.asyncio
+async def test_embedding_failure_does_not_publish_pipeline_complete(broker):
+    collection = FakeCollection()
+    svc = VectorDBService(broker, collection=collection, embedding_model_name="test-model")
+    handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    with patch.object(svc, "_embed_image", new_callable=AsyncMock) as mock_embed:
+        mock_embed.return_value = []
+        await handler({"image_id": "img-1", "path": "/x.jpg", "type": "image.embedding_requested"})
+
+    channels = [ch for ch, _ in published]
+    assert Channels.IMAGE_PIPELINE_COMPLETE not in channels
+    assert Channels.IMAGE_EMBEDDING_FAILED in channels
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_handles_import_error(broker, monkeypatch):
+    svc = VectorDBService(broker, collection=FakeCollection(), embedding_model_name="test-model")
+
+    def _raise_import(*_args, **_kwargs):
+        raise ImportError("sentence_transformers not installed")
+
+    with patch.object(svc, "_model", side_effect=_raise_import):
+        result = await svc.prepare_model()
+
+    assert result is False
+    assert "unavailable" in svc._last_embedding_error
+
+
+def test_normalize_embedding_empty_list():
+    assert _normalize_embedding([]) == []
+
+
+def test_normalize_embedding_non_list():
+    assert _normalize_embedding("not-a-list") == []
+    assert _normalize_embedding(None) == []
+
+
+def test_cosine_similarity_identical_vectors():
+    assert _cosine_similarity([0.6, 0.8], [0.6, 0.8]) == pytest.approx(1.0)
+
+
+def test_cosine_similarity_zero_norm():
+    assert _cosine_similarity([0.0, 0.0], [1.0, 0.0]) == 0.0
+
+
+def test_query_variants_empty_string():
+    assert _query_variants("") == []
+    assert _query_variants("   ") == []

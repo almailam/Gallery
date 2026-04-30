@@ -8,6 +8,7 @@ import logging
 import os
 import shlex
 import shutil
+import signal
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -151,6 +152,37 @@ async def _open_storage() -> tuple[AsyncMongoClient | None, Any, Any, str]:
     return mongo_client, mongo_db.documents, mongo_db.vectors, f"MongoDB ({mongo_uri})"
 
 
+def _install_signal_handlers(
+    loop: asyncio.AbstractEventLoop,
+    stop_event: asyncio.Event,
+) -> None:
+    """Register SIGINT and SIGTERM handlers that trigger a clean shutdown.
+
+    Falls back silently on platforms (e.g. Windows) that do not support
+    ``loop.add_signal_handler``.
+    """
+
+    def _handle(sig: signal.Signals) -> None:
+        if not stop_event.is_set():
+            log.info("Received %s – shutting down gracefully.", sig.name)
+            print(f"\nShutting down (received {sig.name})…", flush=True)
+            stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _handle, sig)
+        except (NotImplementedError, OSError):
+            pass
+
+
+def _remove_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.remove_signal_handler(sig)
+        except (NotImplementedError, OSError):
+            pass
+
+
 async def main() -> None:
     debug_log = _debug_log_path()
     _configure_debug_logging(debug_log)
@@ -190,13 +222,28 @@ async def main() -> None:
         print("Embedding model: will load on first use")
     cli = CLIService(broker)
 
+    # Install signal handlers so Ctrl-C / SIGTERM trigger a clean shutdown
+    # rather than an abrupt exit.
+    loop = asyncio.get_running_loop()
+    _stop = asyncio.Event()
+    _install_signal_handlers(loop, _stop)
+
     # Run the broker listener and the interactive CLI concurrently.
-    # When the user quits the CLI, cancel the listener so the process can exit
-    # (broker.listen() would otherwise run forever).
+    # Shutdown is triggered by the user typing "quit", or by SIGINT/SIGTERM.
     listen_task = asyncio.create_task(broker.listen())
+    cli_task = asyncio.create_task(cli.run_interactive())
+    stop_task = asyncio.create_task(_stop.wait())
     try:
-        await cli.run_interactive()
+        done, pending = await asyncio.wait(
+            {cli_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
     finally:
+        _remove_signal_handlers(loop)
         listen_task.cancel()
         try:
             await listen_task
@@ -214,4 +261,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Ctrl-C before the event loop started; exit cleanly.
+        pass
