@@ -3,22 +3,17 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from gallery.broker.pubsub import Channels, RedisBroker
 from gallery.messages import (
     ImageListReady,
-    ImagePipelineComplete,
     ImageStored,
     StorageClearCompleted,
 )
+from gallery.utils import _utc_now_iso
 
 log = logging.getLogger(__name__)
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class DocumentDBService:
@@ -61,10 +56,6 @@ class DocumentDBService:
             await self.broker.publish(
                 Channels.IMAGE_STORED,
                 ImageStored(image_id=image_id, path=msg.get("path", "")),
-            )
-            await self.broker.publish(
-                Channels.IMAGE_PIPELINE_COMPLETE,
-                ImagePipelineComplete(image_id=image_id, path=msg.get("path", "")),
             )
 
         @self.broker.on(Channels.IMAGE_LIST_REQUESTED)

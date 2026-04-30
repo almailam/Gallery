@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
-import os
-import sys
 from pathlib import Path
 
 from prompt_toolkit import PromptSession, print_formatted_text
@@ -22,6 +20,7 @@ from gallery.messages import (
     SearchRequested,
     StorageClearRequested,
 )
+from gallery.utils import _use_ansi_color
 
 log = logging.getLogger(__name__)
 
@@ -36,10 +35,6 @@ COMMAND_NAMES = tuple(spec.split(maxsplit=1)[0] for spec, _ in COMMAND_SPECS)
 COMPLETION_COMMANDS = (*COMMAND_NAMES, *EXIT_COMMANDS)
 COMMAND_USAGE = "Usage:  " + "  |  ".join((*[spec for spec, _ in COMMAND_SPECS], "quit"))
 COMMAND_BANNER = "\nCommands:  " + "  |  ".join((*[spec for spec, _ in COMMAND_SPECS], "quit"))
-
-
-def _use_ansi_color() -> bool:
-    return sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
 
 
 def _html(value: object) -> str:

@@ -65,3 +65,42 @@ async def test_json_collection_find_returns_async_snapshot(tmp_path):
         {"_id": "img-1", "embedding": [1.0, 0.0]},
         {"_id": "img-2", "embedding": [0.0, 1.0]},
     ]
+
+
+@pytest.mark.asyncio
+async def test_json_collection_find_one_returns_none_for_missing_key(tmp_path):
+    collection = JsonCollection(tmp_path / "data.json")
+    assert await collection.find_one({"_id": "nonexistent"}) is None
+
+
+@pytest.mark.asyncio
+async def test_json_collection_find_one_returns_none_for_missing_id_field(tmp_path):
+    collection = JsonCollection(tmp_path / "data.json")
+    # filter without _id should return None
+    assert await collection.find_one({}) is None
+
+
+@pytest.mark.asyncio
+async def test_json_collection_update_one_no_upsert_does_not_create(tmp_path):
+    collection = JsonCollection(tmp_path / "data.json")
+    await collection.update_one(
+        {"_id": "img-1"},
+        {"$set": {"path": "/img.jpg"}},
+        upsert=False,
+    )
+    assert await collection.find_one({"_id": "img-1"}) is None
+
+
+@pytest.mark.asyncio
+async def test_json_collection_loads_existing_file(tmp_path):
+    import json as _json
+
+    path = tmp_path / "data.json"
+    path.write_text(
+        _json.dumps({"records": {"img-1": {"_id": "img-1", "path": "/existing.jpg"}}}),
+        encoding="utf-8",
+    )
+    collection = JsonCollection(path)
+    record = await collection.find_one({"_id": "img-1"})
+    assert record is not None
+    assert record["path"] == "/existing.jpg"
