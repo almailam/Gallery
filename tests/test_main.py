@@ -114,6 +114,10 @@ def test_install_signal_handlers_registers_sigint():
     registered = _capture_signal_handlers(loop, stop_event)
 
     assert signal.SIGINT in registered
+    # Verify the registered callback actually sets the stop event.
+    fn, args = registered[signal.SIGINT]
+    fn(*args)
+    stop_event.set.assert_called_once()
 
 
 def test_install_signal_handlers_registers_sigterm():
@@ -124,6 +128,10 @@ def test_install_signal_handlers_registers_sigterm():
     registered = _capture_signal_handlers(loop, stop_event)
 
     assert signal.SIGTERM in registered
+    # Verify the registered callback actually sets the stop event.
+    fn, args = registered[signal.SIGTERM]
+    fn(*args)
+    stop_event.set.assert_called_once()
 
 
 def test_install_signal_handlers_sigint_sets_stop_event():
