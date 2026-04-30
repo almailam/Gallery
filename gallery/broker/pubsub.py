@@ -38,6 +38,7 @@ _TYPE_COLOR: dict[str, str] = {
     "image.upload_requested": "\033[38;5;214m",  # orange
     "image.accepted": "\033[32m",  # green
     "image.embedding_requested": "\033[38;5;99m",  # purple
+    "image.embedding_failed": "\033[31m",  # red
     "image.stored": "\033[38;5;118m",  # yellow-green
     "image.pipeline_complete": "\033[38;5;51m",  # cyan
     "image.list_requested": "\033[38;5;75m",
@@ -95,6 +96,7 @@ class Channels:
     IMAGE_UPLOAD_REQUESTED = "gallery:image:upload_requested"
     IMAGE_ACCEPTED = "gallery:image:accepted"
     IMAGE_EMBEDDING_REQUESTED = "gallery:image:embedding_requested"
+    IMAGE_EMBEDDING_FAILED = "gallery:image:embedding_failed"
     IMAGE_STORED = "gallery:image:stored"
     IMAGE_PIPELINE_COMPLETE = "gallery:image:pipeline_complete"
     IMAGE_LIST_REQUESTED = "gallery:image:list_requested"

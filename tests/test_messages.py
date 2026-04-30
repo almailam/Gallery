@@ -3,6 +3,7 @@ from datetime import datetime
 
 from gallery.messages import (
     ImageAccepted,
+    ImageEmbeddingFailed,
     ImageEmbeddingRequested,
     ImageListReady,
     ImageListRequested,
@@ -70,6 +71,15 @@ def test_image_embedding_requested_fields():
     assert m.type == "image.embedding_requested"
     data = json.loads(m.to_json())
     assert data["path"] == "/img.jpg"
+
+
+def test_image_embedding_failed_fields():
+    m = ImageEmbeddingFailed(image_id="abc", path="/img.jpg", reason="missing dependency")
+    assert m.type == "image.embedding_failed"
+    data = json.loads(m.to_json())
+    assert data["image_id"] == "abc"
+    assert data["path"] == "/img.jpg"
+    assert data["reason"] == "missing dependency"
 
 
 def test_image_list_requested_type():

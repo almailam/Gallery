@@ -70,6 +70,7 @@ def test_ansi_for_message_type_known_types_distinct():
         "image.upload_requested",
         "image.accepted",
         "image.embedding_requested",
+        "image.embedding_failed",
         "image.stored",
         "image.pipeline_complete",
         "search.requested",
@@ -97,6 +98,7 @@ def test_channels_constants():
     assert Channels.IMAGE_UPLOAD_REQUESTED == "gallery:image:upload_requested"
     assert Channels.IMAGE_ACCEPTED == "gallery:image:accepted"
     assert Channels.IMAGE_EMBEDDING_REQUESTED == "gallery:image:embedding_requested"
+    assert Channels.IMAGE_EMBEDDING_FAILED == "gallery:image:embedding_failed"
     assert Channels.IMAGE_STORED == "gallery:image:stored"
     assert Channels.IMAGE_PIPELINE_COMPLETE == "gallery:image:pipeline_complete"
     assert Channels.SEARCH_REQUESTED == "gallery:search:requested"

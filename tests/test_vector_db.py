@@ -102,6 +102,31 @@ async def test_embedding_calls_model_once_then_reuses_for_same_image_id(broker):
 
 
 @pytest.mark.asyncio
+async def test_embedding_failure_publishes_visible_event(broker):
+    collection = _FakeCollection()
+    svc = VectorDBService(broker, collection=collection, embedding_model_name="test-model")
+    handler = broker._handlers[Channels.IMAGE_EMBEDDING_REQUESTED][0]
+    published: list[tuple[str, dict]] = []
+
+    async def capture(channel: str, payload: str) -> None:
+        published.append((channel, json.loads(payload)))
+
+    broker._client.publish = AsyncMock(side_effect=capture)
+    svc._last_embedding_error = "missing dependency"
+    with patch.object(svc, "_embed_image", new_callable=AsyncMock) as mock_embed:
+        mock_embed.return_value = []
+        await handler({"image_id": "img-1", "path": "/x.jpg", "type": "image.embedding_requested"})
+
+    assert collection.records == {}
+    assert len(published) == 1
+    channel, body = published[0]
+    assert channel == Channels.IMAGE_EMBEDDING_FAILED
+    assert body["image_id"] == "img-1"
+    assert body["path"] == "/x.jpg"
+    assert body["reason"] == "missing dependency"
+
+
+@pytest.mark.asyncio
 async def test_embedding_reuses_embedding_for_same_file_path_different_id(tmp_path, broker):
     collection = _FakeCollection()
     image_file = tmp_path / "same.jpg"

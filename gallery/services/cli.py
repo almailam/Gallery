@@ -103,6 +103,14 @@ class CLIService:
                 f"image_id={msg.get('image_id')} path={msg.get('path')}",
             )
 
+        @self.broker.on(Channels.IMAGE_EMBEDDING_FAILED)
+        async def on_embedding_failed(msg: dict) -> None:
+            self._print_error(
+                "embedding failed "
+                f"image_id={msg.get('image_id')} path={msg.get('path')} reason={msg.get('reason')}"
+            )
+            self._print_hint("install dependencies with `pip install -r requirements.txt`, then restart the app")
+
         @self.broker.on(Channels.SEARCH_RESULTS_READY)
         async def on_search_results(msg: dict) -> None:
             results = msg.get("results", [])

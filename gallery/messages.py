@@ -39,6 +39,14 @@ class ImageEmbeddingRequested(Message):
 
 
 @dataclass
+class ImageEmbeddingFailed(Message):
+    type: str = "image.embedding_failed"
+    image_id: str = ""
+    path: str = ""
+    reason: str = ""
+
+
+@dataclass
 class ImageStored(Message):
     type: str = "image.stored"
     image_id: str = ""

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from gallery.broker.pubsub import Channels, RedisBroker
-from gallery.messages import SearchResultsReady, StorageClearCompleted
+from gallery.messages import ImageEmbeddingFailed, SearchResultsReady, StorageClearCompleted
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +77,7 @@ class VectorDBService:
         self._embedding_model = embedding_model
         self._embedding_model_name = embedding_model_name or _embedding_model_name()
         self._search_min_score = _search_min_score()
+        self._last_embedding_error = ""
         self._register_handlers()
 
     def _model(self) -> Any:
@@ -111,12 +112,15 @@ class VectorDBService:
                 )
             return self._vector_to_list(vector)
         except OSError as e:
+            self._last_embedding_error = f"failed reading image: {e}"
             log.warning("[VectorDB] Failed reading image %s: %s", path, e)
             return []
         except ImportError as e:
+            self._last_embedding_error = f"embedding dependencies are unavailable: {e}"
             log.warning("[VectorDB] Embedding dependencies are unavailable: %s", e)
             return []
         except Exception as e:
+            self._last_embedding_error = f"image embedding failed: {e}"
             log.warning("[VectorDB] Image embedding failed for %s: %s", path, e)
             return []
 
@@ -133,9 +137,11 @@ class VectorDBService:
             )
             return self._vector_to_list(vector)
         except ImportError as e:
+            self._last_embedding_error = f"embedding dependencies are unavailable: {e}"
             log.warning("[VectorDB] Embedding dependencies are unavailable: %s", e)
             return []
         except Exception as e:
+            self._last_embedding_error = f"text embedding failed: {e}"
             log.warning("[VectorDB] Text embedding failed for query=%r: %s", query, e)
             return []
 
@@ -247,7 +253,16 @@ class VectorDBService:
             else:
                 embedding = await self._embed_image(path)
             if not embedding:
+                reason = self._last_embedding_error or "embedding generation returned no vector"
                 log.warning("[VectorDB] no embedding stored for image_id=%s path=%s", image_id, path)
+                await self.broker.publish(
+                    Channels.IMAGE_EMBEDDING_FAILED,
+                    ImageEmbeddingFailed(
+                        image_id=image_id,
+                        path=path,
+                        reason=reason,
+                    ),
+                )
                 return
 
             await self._store_embedding(image_id, path, embedding)
